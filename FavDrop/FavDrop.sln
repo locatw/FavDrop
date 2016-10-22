@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.25420.1
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "FavDrop", "FavDrop\FavDrop.fsproj", "{3372FFB5-C177-4D3A-ACD6-68C5A3F68A3F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3372FFB5-C177-4D3A-ACD6-68C5A3F68A3F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3372FFB5-C177-4D3A-ACD6-68C5A3F68A3F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3372FFB5-C177-4D3A-ACD6-68C5A3F68A3F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3372FFB5-C177-4D3A-ACD6-68C5A3F68A3F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
