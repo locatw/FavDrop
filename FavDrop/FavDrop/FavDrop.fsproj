@@ -59,6 +59,7 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Program.fs" />
+    <None Include="App.secret.config.template" />
     <Content Include="App.secret.config">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
