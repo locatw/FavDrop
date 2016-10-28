@@ -252,3 +252,5 @@ paket-files/
 *.sln.iml
 /FavDrop/FavDrop/App.secret.config
 /FavDrop/.paket/paket.exe
+/FavDrop/pack
+/FavDrop/*.zip
