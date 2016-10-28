@@ -251,3 +251,4 @@ paket-files/
 .idea/
 *.sln.iml
 /FavDrop/FavDrop/App.secret.config
+/FavDrop/.paket/paket.exe
