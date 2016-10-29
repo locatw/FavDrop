@@ -5,6 +5,7 @@ open Fake
 let projectRootDir = "FavDrop"
 let releaseDir = projectRootDir @@ "bin/Release"
 let packDir = "pack/"
+let packedAppRootDir = packDir @@ "FavDrop"
 
 Target "BuildApp" (fun _ ->
     !! (projectRootDir @@ "/**/*.fsproj")
@@ -13,16 +14,16 @@ Target "BuildApp" (fun _ ->
 )
 
 Target "Pack" (fun _ ->
-    if not (TestDir packDir) then
-        CreateDir packDir
+    if not (TestDir packedAppRootDir) then
+        CreateDir packedAppRootDir
     else
-        CleanDir packDir
+        CleanDir packedAppRootDir
 
     !! (releaseDir @@ "*.exe")
     ++ (releaseDir @@ "*.dll")
     ++ (releaseDir @@ "*.config")
     -- (releaseDir @@ "*.secret.config")
-    |> Copy packDir
+    |> Copy packedAppRootDir
 )
 
 Target "MakeReleaseZip" (fun _ ->
