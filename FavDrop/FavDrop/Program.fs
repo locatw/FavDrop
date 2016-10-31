@@ -3,17 +3,32 @@ open Dropbox.Api
 open FSharpx.Control
 open System.Configuration
 
+type PhotoMedium = {
+    Url : string
+}
+
+type Medium =
+| PhotoMedium of PhotoMedium
+
 type FavoritedTweet = {
     TweetId : int64
-    MediaUrls : string list
+    Media : Medium list
 }
 
 module TwitterSource =
+    let private convertPhotoMedium (media : CoreTweet.MediaEntity) =
+        { PhotoMedium.Url = media.MediaUrlHttps }
+
+    let private convertMedia (media : CoreTweet.MediaEntity) =
+        match media.Type with
+        | "photo" -> PhotoMedium (convertPhotoMedium media)
+        | _ -> raise (System.NotSupportedException("unsupported media type"))
+
     let private convertTweet (tweet : Status) = 
-        let mediaUrls = tweet.Entities.Media
-                        |> Array.map (fun media -> media.MediaUrl)
-                        |> Array.toList
-        { TweetId = tweet.Id; MediaUrls = mediaUrls }
+        let media = tweet.ExtendedEntities.Media
+                    |> Array.map convertMedia
+                    |> Array.toList
+        { TweetId = tweet.Id; Media = media }
 
     let private withPhotos(status : Status) =
         status.Entities.Media
@@ -55,15 +70,17 @@ module DropboxSink =
         return tweetFolderPath
     }
 
-    let private saveMediaAsync (client : DropboxClient) tweetFolderPath (mediaUrl : string) = async {
-        let fileName = mediaUrl.Split('/') |> Array.last
+    let private saveMediaAsync (client : DropboxClient) tweetFolderPath (medium : Medium) = async {
+        let url = match medium with
+                  | PhotoMedium x ->  x.Url
+        let fileName = url.Split('/') |> Array.last
         let filePath = tweetFolderPath + "/" + fileName
-        return! client.Files.SaveUrlAsync(filePath, mediaUrl)
+        return! client.Files.SaveUrlAsync(filePath, url)
                 |> Async.AwaitTask
     }
 
     let private saveFavoritedTweetAsync (client : DropboxClient) tweetFolderPath tweet = async {
-        tweet.MediaUrls
+        tweet.Media
         |> List.map (saveMediaAsync client tweetFolderPath)
         |> Async.Parallel
         |> Async.RunSynchronously
