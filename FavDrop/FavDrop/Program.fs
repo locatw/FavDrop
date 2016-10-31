@@ -3,21 +3,27 @@ open Dropbox.Api
 open FSharpx.Control
 open System.Configuration
 
+type FavoritedTweet = {
+    TweetId : int64
+    MediaUrls : string list
+}
+
 module TwitterSource =
+    let private convertTweet (tweet : Status) = 
+        let mediaUrls = tweet.Entities.Media
+                        |> Array.map (fun media -> media.MediaUrl)
+                        |> Array.toList
+        { TweetId = tweet.Id; MediaUrls = mediaUrls }
+
     let private withPhotos(status : Status) =
         status.Entities.Media
         |> Array.exists(fun media -> media.Type = "photo")
 
-    let private queuePhoto (queue : BlockingQueueAgent<string>) (media : MediaEntity) =
-        queue.Add(media.MediaUrl)
-        System.Console.WriteLine("queued : {0}", media.MediaUrl)
-
-    let private queuePhotos (queue : BlockingQueueAgent<string>) (status : Status) =
-        status.Entities.Media
-        |> Array.filter(fun media -> media.Type = "photo")
-        |> Array.iter (queuePhoto queue)
+    let private queueTweet (queue : BlockingQueueAgent<FavoritedTweet>) favoritedTweet =
+        queue.Add(favoritedTweet)
+        System.Console.WriteLine("tweet queued : {0}", favoritedTweet.TweetId)
     
-    let run (queue : BlockingQueueAgent<string>) = async {
+    let run (queue : BlockingQueueAgent<FavoritedTweet>) = async {
         let consumerKey = ConfigurationManager.AppSettings.Item("TwitterConsumerKey")
         let consumerSecret = ConfigurationManager.AppSettings.Item("TwitterConsumerSecret")
         let accessToken = ConfigurationManager.AppSettings.Item("TwitterAccessToken")
@@ -32,75 +38,56 @@ module TwitterSource =
         |> Seq.filter(fun msg -> msg.Event = Streaming.EventCode.Favorite)
         |> Seq.map(fun msg -> msg.TargetStatus)
         |> Seq.filter withPhotos
-        |> Seq.iter (queuePhotos queue)
+        |> Seq.map convertTweet
+        |> Seq.iter (queueTweet queue)
     }
 
 module DropboxSink =
-    let private saveFolderName = "photos"
+    let private saveFolderPath = "/"
 
-    let private saveFolderPath = "/" + saveFolderName
+    let private createTweetFolderAsync (client : DropboxClient) tweet = async {
+        let tweetFolderPath = saveFolderPath + "/" + tweet.TweetId.ToString()
 
-    let private saveFolderExistsAsync (client : DropboxClient) = async {
-        let existsInFolders (folders : Files.ListFolderResult)=
-            folders.Entries
-            |> List.ofSeq
-            |> List.exists(fun entity -> entity.Name = saveFolderName)
+        client.Files.CreateFolderAsync(tweetFolderPath)
+        |> Async.AwaitTask
+        |> ignore
 
-        let rec checkRemainAsync (cursor : string) = async {
-            let! folders = client.Files.ListFolderContinueAsync(cursor) |> Async.AwaitTask
-            if existsInFolders folders then
-                return true
-            elif folders.HasMore then
-                return! checkRemainAsync folders.Cursor
-            else
-                return false
-        }
-
-        let! foldersInRoot = client.Files.ListFolderAsync("") |> Async.AwaitTask
-        if existsInFolders foldersInRoot then
-            return true
-        elif foldersInRoot.HasMore then
-            return! checkRemainAsync foldersInRoot.Cursor
-        else
-            return false
+        return tweetFolderPath
     }
 
-    let private createSaveFolderAsync (client : DropboxClient) = async {
-        do! client.Files.CreateFolderAsync(saveFolderPath)
-            |> Async.AwaitTask
-            |> Async.Ignore
+    let private saveMediaAsync (client : DropboxClient) tweetFolderPath (mediaUrl : string) = async {
+        let fileName = mediaUrl.Split('/') |> Array.last
+        let filePath = tweetFolderPath + "/" + fileName
+        return! client.Files.SaveUrlAsync(filePath, mediaUrl)
+                |> Async.AwaitTask
     }
 
-    let private createSaveFolderIfNotExistsAsync (client : DropboxClient) = async {
-        let! saveFolderExists = saveFolderExistsAsync client
-        if not saveFolderExists then
-            return! createSaveFolderAsync client
+    let private saveFavoritedTweetAsync (client : DropboxClient) tweetFolderPath tweet = async {
+        tweet.MediaUrls
+        |> List.map (saveMediaAsync client tweetFolderPath)
+        |> Async.Parallel
+        |> Async.RunSynchronously
+        |> ignore
     }
 
-    let run (queue : BlockingQueueAgent<string>) = async {
+    let run (queue : BlockingQueueAgent<FavoritedTweet>) = async {
         let accessToken = ConfigurationManager.AppSettings.Item("DropboxAccessToken")
         use client = new DropboxClient(accessToken)
-
-        do! createSaveFolderIfNotExistsAsync client
 
         System.Console.WriteLine("DropboxSink initialized")
         
         while true do
-            let! photoUrl = queue.AsyncGet()
-            System.Console.WriteLine("got photo url: {0}", photoUrl)
+            let! tweet = queue.AsyncGet()
 
-            let fileName = photoUrl.Split('/') |> Array.last
-            let saveFilePath = saveFolderPath + "/" + fileName
+            System.Console.WriteLine("got favorited tweet: {0}", tweet.TweetId)
 
-            client.Files.SaveUrlAsync(saveFilePath, photoUrl)
-            |> Async.AwaitTask
-            |> Async.Ignore
-            |> Async.Start
+            let! tweetFolderPath = createTweetFolderAsync client tweet
+            do! saveFavoritedTweetAsync client tweetFolderPath tweet
     }
         
 [<EntryPoint>]
 let main _ = 
-    let queue = new BlockingQueueAgent<string>(100)
+    let queue = new BlockingQueueAgent<FavoritedTweet>(100)
 
     [TwitterSource.run queue; DropboxSink.run queue]
     |> Async.Parallel
