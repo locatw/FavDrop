@@ -7,8 +7,14 @@ type PhotoMedium = {
     Url : string
 }
 
+type VideoMedium = {
+    ThumnailUrl : string
+    VideoUrl : string
+}
+
 type Medium =
 | PhotoMedium of PhotoMedium
+| VideoMedium of VideoMedium
 
 type FavoritedTweet = {
     TweetId : int64
@@ -19,9 +25,19 @@ module TwitterSource =
     let private convertPhotoMedium (media : CoreTweet.MediaEntity) =
         { PhotoMedium.Url = media.MediaUrlHttps }
 
+    let private convertVideoMedia (media : CoreTweet.MediaEntity) =
+        let largeVideo = media.VideoInfo.Variants
+                         |> Array.filter (fun variant -> let x = variant.Bitrate in x.HasValue) // deal with warning
+                         |> Array.maxBy (fun variant -> let x = variant.Bitrate in x.Value) // deal with warning
+
+        // 画像のMediaUrlHttpsを使うとDropboxに保存されるサムネイル画像が壊れる。
+        { VideoMedium.ThumnailUrl = media.MediaUrl
+          VideoUrl = largeVideo.Url }
+
     let private convertMedia (media : CoreTweet.MediaEntity) =
         match media.Type with
         | "photo" -> PhotoMedium (convertPhotoMedium media)
+        | "video" -> VideoMedium (convertVideoMedia media)
         | _ -> raise (System.NotSupportedException("unsupported media type"))
 
     let private convertTweet (tweet : Status) = 
@@ -70,13 +86,32 @@ module DropboxSink =
         return tweetFolderPath
     }
 
-    let private saveMediaAsync (client : DropboxClient) tweetFolderPath (medium : Medium) = async {
-        let url = match medium with
-                  | PhotoMedium x ->  x.Url
+    let private savePhotoMediaAsync (client : DropboxClient) tweetFolderPath (photo : PhotoMedium) = async {
+        let url = photo.Url
         let fileName = url.Split('/') |> Array.last
         let filePath = tweetFolderPath + "/" + fileName
         return! client.Files.SaveUrlAsync(filePath, url)
                 |> Async.AwaitTask
+                |> Async.Ignore
+    }
+
+    let private saveVideoMediaAsync (client : DropboxClient) tweetFolderPath (video: VideoMedium) = async {
+        let makeFileName (url : string) = url.Split('/') |> Array.last
+
+        let makeFilePath fileName = tweetFolderPath + "/" + fileName
+
+        return! [video.ThumnailUrl;  video.VideoUrl]
+                |> List.map (fun url -> (url, (makeFilePath << makeFileName) url))
+                |> List.map (fun (url, filePath) -> client.Files.SaveUrlAsync(filePath, url))
+                |> List.map Async.AwaitTask
+                |> Async.Parallel
+                |> Async.Ignore
+    }
+
+    let private saveMediaAsync (client : DropboxClient) tweetFolderPath (medium : Medium) = async {
+        return! match medium with
+                | PhotoMedium x -> savePhotoMediaAsync client tweetFolderPath x
+                | VideoMedium x -> saveVideoMediaAsync client tweetFolderPath x
     }
 
     let private saveFavoritedTweetAsync (client : DropboxClient) tweetFolderPath tweet = async {
