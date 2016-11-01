@@ -1,7 +1,11 @@
 ﻿open CoreTweet
 open Dropbox.Api
+open FSharp.Data
 open FSharpx.Control
+open System
 open System.Configuration
+open System.IO
+open System.Text
 
 type PhotoMedium = {
     Url : string
@@ -16,10 +20,49 @@ type Medium =
 | PhotoMedium of PhotoMedium
 | VideoMedium of VideoMedium
 
+type TwitterUser = {
+    Id : int64 option
+    Name : string
+    ScreenName : string
+}
+
 type FavoritedTweet = {
     TweetId : int64
+    User : TwitterUser
+    CreatedAt : DateTimeOffset
+    FavoritedAt : DateTimeOffset
+    Text : string
     Media : Medium list
 }
+
+[<Literal>]
+let tweetInfoSample = """
+{
+  "format_version": "[version number]",
+  "id": 1000000000000,
+  "user": {
+    "id": 1000000000000,
+    "name": "user_name",
+    "screen_name": "screen_name"
+  },
+  "created_at": "2016/01/01 00:00:00",
+  "favorited_at": "2016/01/01 00:00:00",
+  "text": "text",
+  "media": [
+    {
+      "type": "photo",
+      "url": "https://www.sample.com/"
+    },
+    {
+      "type": "video",
+      "thumnail_url": "https://www.sample.com/",
+      "video_url": "https://www.sample.com/"
+    }
+  ]
+}
+"""
+
+type TweetInfo = JsonProvider<tweetInfoSample, RootName = "tweet">
 
 module TwitterSource =
     let private convertPhotoMedium (media : CoreTweet.MediaEntity) =
@@ -44,7 +87,21 @@ module TwitterSource =
         let media = tweet.ExtendedEntities.Media
                     |> Array.map convertMedia
                     |> Array.toList
-        { TweetId = tweet.Id; Media = media }
+        let tweetUserId = tweet.User.Id
+        let user = { Id = if tweetUserId.HasValue then
+                            Some tweetUserId.Value
+                          else
+                            None
+                     Name = tweet.User.Name
+                     ScreenName = tweet.User.ScreenName }
+        { TweetId = tweet.Id
+          User = user
+          CreatedAt = tweet.CreatedAt
+          FavoritedAt = DateTimeOffset.Now
+          Text = match tweet.FullText with
+                 | null -> tweet.Text
+                 | _ -> tweet.Text
+          Media = media }
 
     let private withPhotos(status : Status) =
         status.Entities.Media
@@ -74,7 +131,7 @@ module TwitterSource =
     }
 
 module DropboxSink =
-    let private saveFolderPath = "/"
+    let private saveFolderPath = ""
 
     let private createTweetFolderAsync (client : DropboxClient) tweet = async {
         let tweetFolderPath = saveFolderPath + "/" + tweet.TweetId.ToString()
@@ -114,9 +171,40 @@ module DropboxSink =
                 | VideoMedium x -> saveVideoMediaAsync client tweetFolderPath x
     }
 
+    let private saveTweetInfoAsync (client : DropboxClient) tweetFolderPath (tweet : FavoritedTweet) = async {
+        let userId = match tweet.User.Id with
+                     | Some x -> x
+                     | None -> -1L
+        let user = new TweetInfo.User(userId, tweet.User.Name, tweet.User.ScreenName)
+        let media = tweet.Media
+                    |> List.map (fun media ->
+                                    match media with
+                                    | PhotoMedium x -> new TweetInfo.Media("photo", Some x.Url, None, None)
+                                    | VideoMedium x -> new TweetInfo.Media("video", None, Some x.ThumnailUrl, Some x.VideoUrl))
+                    |> List.toArray
+        let json = TweetInfo.Tweet(
+                    "0.1",
+                    tweet.TweetId,
+                    user,
+                    tweet.CreatedAt.DateTime,
+                    tweet.FavoritedAt.DateTime,
+                    tweet.Text,
+                    media)
+        let jsonText = json.JsonValue.ToString()
+
+        use memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(jsonText))
+        let filePath = tweetFolderPath + "/" + "TweetInfo.json"
+        return! client.Files.UploadAsync(filePath, Files.WriteMode.Overwrite.Instance, body = memoryStream)
+                |> Async.AwaitTask
+                |> Async.Ignore
+    }
+
     let private saveFavoritedTweetAsync (client : DropboxClient) tweetFolderPath tweet = async {
-        tweet.Media
-        |> List.map (saveMediaAsync client tweetFolderPath)
+        let saveMedia = tweet.Media
+                        |> List.map (saveMediaAsync client tweetFolderPath)
+        let saveTweetInfo = saveTweetInfoAsync client tweetFolderPath tweet
+
+        saveTweetInfo :: saveMedia
         |> Async.Parallel
         |> Async.RunSynchronously
         |> ignore
