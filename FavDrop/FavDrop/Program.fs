@@ -1,6 +1,8 @@
 ﻿open CoreTweet
 open Dropbox.Api
 open FSharp.Data
+open FSharpx
+open FSharpx.Option
 open FSharpx.Control
 open System
 open System.Configuration
@@ -107,9 +109,18 @@ module TwitterSource =
           Text = text
           Media = media }
 
-    let private withPhotos(status : Status) =
-        status.Entities.Media
-        |> Array.exists(fun media -> media.Type = "photo")
+    let private withMedia (tweet : Status) =
+        let isMediaInEntities (entities : CoreTweet.Entities) =
+            let media =
+                maybe {
+                    let! entities = entities |> FSharpOption.ToFSharpOption
+                    return! entities.Media |> FSharpOption.ToFSharpOption
+                }
+            match media with
+            | Some x -> 0 < x.Length
+            | None -> false
+        [tweet.Entities; tweet.ExtendedEntities]
+        |> List.forall isMediaInEntities
 
     let private queueTweet (queue : BlockingQueueAgent<FavoritedTweet>) favoritedTweet =
         queue.Add(favoritedTweet)
@@ -129,7 +140,7 @@ module TwitterSource =
         |> Seq.map(fun msg -> msg :?> Streaming.EventMessage)
         |> Seq.filter(fun msg -> msg.Event = Streaming.EventCode.Favorite)
         |> Seq.map(fun msg -> msg.TargetStatus)
-        |> Seq.filter withPhotos
+        |> Seq.filter withMedia
         |> Seq.map convertTweet
         |> Seq.iter (queueTweet queue)
     }
