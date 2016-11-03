@@ -35,6 +35,9 @@ type FavoritedTweet = {
     Media : Medium list
 }
 
+// I want to use DateTimeOffset to create_at and favorited_at,
+// but JsonProvider doesn't support DateTimeOffset.
+// Insted, use string with timezone.
 [<Literal>]
 let tweetInfoSample = """
 {
@@ -45,8 +48,8 @@ let tweetInfoSample = """
     "name": "user_name",
     "screen_name": "screen_name"
   },
-  "created_at": "2016/01/01 00:00:00",
-  "favorited_at": "2016/01/01 00:00:00",
+  "created_at": "string represents the date",
+  "favorited_at": "string represents the date",
   "text": "text",
   "media": [
     {
@@ -183,11 +186,11 @@ module DropboxSink =
                                     | VideoMedium x -> new TweetInfo.Media("video", None, Some x.ThumnailUrl, Some x.VideoUrl))
                     |> List.toArray
         let json = TweetInfo.Tweet(
-                    "0.1",
+                    "0.2",
                     tweet.TweetId,
                     user,
-                    tweet.CreatedAt.DateTime,
-                    tweet.FavoritedAt.DateTime,
+                    tweet.CreatedAt.ToString(),
+                    tweet.FavoritedAt.ToString(),
                     tweet.Text,
                     media)
         let jsonText = json.JsonValue.ToString()
