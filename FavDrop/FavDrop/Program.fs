@@ -91,19 +91,20 @@ module TwitterSource =
                     |> Array.map convertMedia
                     |> Array.toList
         let tweetUserId = tweet.User.Id
-        let user = { Id = if tweetUserId.HasValue then
-                            Some tweetUserId.Value
-                          else
-                            None
-                     Name = tweet.User.Name
-                     ScreenName = tweet.User.ScreenName }
+        let userId =
+            if tweetUserId.HasValue then
+              Some tweetUserId.Value
+            else
+              None
+        let user = { Id = userId; Name = tweet.User.Name; ScreenName = tweet.User.ScreenName }
+        let text = match tweet.FullText with
+                   | null | "" -> tweet.Text
+                   | _ -> tweet.FullText
         { TweetId = tweet.Id
           User = user
           CreatedAt = tweet.CreatedAt
           FavoritedAt = DateTimeOffset.Now
-          Text = match tweet.FullText with
-                 | null -> tweet.Text
-                 | _ -> tweet.Text
+          Text = text
           Media = media }
 
     let private withPhotos(status : Status) =
@@ -162,8 +163,8 @@ module DropboxSink =
 
     let private saveVideoMediaAsync (client : DropboxClient) (makeMediaFilePath : string -> string) (video: VideoMedium) = async {
         return! [video.ThumnailUrl;  video.VideoUrl]
-                |> List.map (fun url -> (url, makeMediaFilePath url))
-                |> List.map (fun (url, filePath) -> client.Files.SaveUrlAsync(filePath, url))
+                |> List.map (fun url -> (makeMediaFilePath url), url)
+                |> List.map (fun (filePath, url) -> client.Files.SaveUrlAsync(filePath, url))
                 |> List.map Async.AwaitTask
                 |> Async.Parallel
                 |> Async.Ignore
@@ -176,15 +177,17 @@ module DropboxSink =
     }
 
     let private saveTweetInfoAsync (client : DropboxClient) tweetFolderPath (tweet : FavoritedTweet) = async {
+        let makeTweetInfoMedia media =
+            match media with
+            | PhotoMedium x -> new TweetInfo.Media("photo", Some x.Url, None, None)
+            | VideoMedium x -> new TweetInfo.Media("video", None, Some x.ThumnailUrl, Some x.VideoUrl)
+
         let userId = match tweet.User.Id with
                      | Some x -> x
                      | None -> -1L
         let user = new TweetInfo.User(userId, tweet.User.Name, tweet.User.ScreenName)
         let media = tweet.Media
-                    |> List.map (fun media ->
-                                    match media with
-                                    | PhotoMedium x -> new TweetInfo.Media("photo", Some x.Url, None, None)
-                                    | VideoMedium x -> new TweetInfo.Media("video", None, Some x.ThumnailUrl, Some x.VideoUrl))
+                    |> List.map makeTweetInfoMedia
                     |> List.toArray
         let json = TweetInfo.Tweet(
                     "0.2",
