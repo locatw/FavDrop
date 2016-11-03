@@ -76,7 +76,7 @@ module TwitterSource =
                          |> Array.filter (fun variant -> let x = variant.Bitrate in x.HasValue) // deal with warning
                          |> Array.maxBy (fun variant -> let x = variant.Bitrate in x.Value) // deal with warning
 
-        // 画像のMediaUrlHttpsを使うとDropboxに保存されるサムネイル画像が壊れる。
+        // Use MediaUrl instead of MediaUrlHttps because currupted thumnail image is saved by Dropbox when use MediaUrlHttps.
         { VideoMedium.ThumnailUrl = media.MediaUrl
           VideoUrl = largeVideo.Url }
 
