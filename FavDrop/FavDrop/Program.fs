@@ -21,6 +21,7 @@ type VideoMedium = {
 type Medium =
 | PhotoMedium of PhotoMedium
 | VideoMedium of VideoMedium
+| AnimatedGifMedium of VideoMedium
 
 type TwitterUser = {
     Id : int64 option
@@ -79,13 +80,14 @@ module TwitterSource =
                          |> Array.maxBy (fun variant -> let x = variant.Bitrate in x.Value) // deal with warning
 
         // Use MediaUrl instead of MediaUrlHttps because currupted thumnail image is saved by Dropbox when use MediaUrlHttps.
-        { VideoMedium.ThumnailUrl = media.MediaUrl
+        { ThumnailUrl = media.MediaUrl
           VideoUrl = largeVideo.Url }
 
     let private convertMedia (media : CoreTweet.MediaEntity) =
         match media.Type with
         | "photo" -> PhotoMedium (convertPhotoMedium media)
         | "video" -> VideoMedium (convertVideoMedia media)
+        | "animated_gif" -> AnimatedGifMedium (convertVideoMedia media)
         | _ -> raise (System.NotSupportedException("unsupported media type"))
 
     let private convertTweet (tweet : Status) = 
@@ -188,6 +190,7 @@ module DropboxSink =
         return! match medium with
                 | PhotoMedium x -> savePhotoMediaAsync client makeMediaFilePath x
                 | VideoMedium x -> saveVideoMediaAsync client makeMediaFilePath x
+                | AnimatedGifMedium x -> saveVideoMediaAsync client makeMediaFilePath x
     }
 
     let private saveTweetInfoAsync (client : DropboxClient) tweetFolderPath (tweet : FavoritedTweet) = async {
@@ -195,6 +198,7 @@ module DropboxSink =
             match media with
             | PhotoMedium x -> new TweetInfo.Media("photo", Some x.Url, None, None)
             | VideoMedium x -> new TweetInfo.Media("video", None, Some x.ThumnailUrl, Some x.VideoUrl)
+            | AnimatedGifMedium x -> new TweetInfo.Media("animated_gif", None, Some x.ThumnailUrl, Some x.VideoUrl)
 
         let userId = match tweet.User.Id with
                      | Some x -> x
