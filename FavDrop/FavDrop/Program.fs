@@ -165,18 +165,21 @@ module DropboxSink =
     let private makeTweetInfoFilePath tweetFolderPath =
         tweetFolderPath + "/" + "TweetInfo.json"
 
-    let private savePhotoMediaAsync (client : DropboxClient) (makeMediaFilePath : string -> string) (photo : PhotoMedium) = async {
-        let filePath = makeMediaFilePath photo.Url
-        return! client.Files.SaveUrlAsync(filePath, photo.Url)
+    let private saveMediumAsync (client : DropboxClient) (makeMediaFilePath : string -> string) (url : string) = async {
+        let! data = Http.AsyncRequestStream(url)
+        let filePath = makeMediaFilePath url
+        do! client.Files.UploadAsync(filePath, Files.WriteMode.Overwrite.Instance, body = data.ResponseStream)
                 |> Async.AwaitTask
                 |> Async.Ignore
     }
 
+    let private savePhotoMediaAsync (client : DropboxClient) (makeMediaFilePath : string -> string) (photo : PhotoMedium) = async {
+        do! saveMediumAsync client makeMediaFilePath photo.Url
+    }
+
     let private saveVideoMediaAsync (client : DropboxClient) (makeMediaFilePath : string -> string) (video: VideoMedium) = async {
         return! [video.ThumnailUrl;  video.VideoUrl]
-                |> List.map (fun url -> (makeMediaFilePath url), url)
-                |> List.map (fun (filePath, url) -> client.Files.SaveUrlAsync(filePath, url))
-                |> List.map Async.AwaitTask
+                |> List.map (saveMediumAsync client makeMediaFilePath)
                 |> Async.Parallel
                 |> Async.Ignore
     }
