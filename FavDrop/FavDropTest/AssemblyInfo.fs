@@ -1,4 +1,4 @@
-﻿namespace FavDrop.AssemblyInfo
+﻿namespace FavDropTest.AssemblyInfo
 
 open System.Reflection
 open System.Runtime.CompilerServices
@@ -7,12 +7,12 @@ open System.Runtime.InteropServices
 // アセンブリに関する一般情報は、以下の属性セットによって
 // 制御されます。アセンブリに関連付けられている情報を変更するには、
 // これらの属性値を変更します。
-[<assembly: AssemblyTitle("FavDrop")>]
+[<assembly: AssemblyTitle("FavDropTest")>]
 [<assembly: AssemblyDescription("")>]
 [<assembly: AssemblyConfiguration("")>]
 [<assembly: AssemblyCompany("")>]
-[<assembly: AssemblyProduct("FavDrop")>]
-[<assembly: AssemblyCopyright("Copyright © locatw 2016")>]
+[<assembly: AssemblyProduct("FavDropTest")>]
+[<assembly: AssemblyCopyright("Copyright ©  2016")>]
 [<assembly: AssemblyTrademark("")>]
 [<assembly: AssemblyCulture("")>]
 
@@ -22,7 +22,7 @@ open System.Runtime.InteropServices
 [<assembly: ComVisible(false)>]
 
 // このプロジェクトが COM に公開される場合、次の GUID がタイプ ライブラリの ID になります
-[<assembly: Guid("3372ffb5-c177-4d3a-acd6-68c5a3f68a3f")>]
+[<assembly: Guid("bb64066b-1ca4-4329-b8a3-84f520457940")>]
 
 // アセンブリのバージョン情報は、以下の 4 つの値で構成されます。:
 // 
@@ -36,8 +36,6 @@ open System.Runtime.InteropServices
 // [<assembly: AssemblyVersion("1.0.*")>]
 [<assembly: AssemblyVersion("1.0.0.0")>]
 [<assembly: AssemblyFileVersion("1.0.0.0")>]
-
-[<assembly: InternalsVisibleTo("FavDropTest")>]
 
 do
     ()

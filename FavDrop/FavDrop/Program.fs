@@ -1,9 +1,11 @@
 ﻿open CoreTweet
 open Dropbox.Api
 open FSharp.Data
+open FSharp.Data.UnitSystems.SI.UnitNames
 open FSharpx
 open FSharpx.Option
 open FSharpx.Control
+open Microsoft.FSharp.Core.LanguagePrimitives
 open System
 open System.Configuration
 open System.IO
@@ -68,6 +70,48 @@ let tweetInfoSample = """
 }
 """
 
+module ExponentialBackoff =
+    [<Measure>]
+    type millisecond
+
+    type RetryActionResult =
+    | Retry
+    | NoRetry
+
+    type RetryConfig = {
+        WaitTime : int<millisecond>
+        MaxWaitTime : int<millisecond>
+    }
+
+    let private nextRetryConfig currentConfig =
+        let waitTime = 2 * currentConfig.WaitTime
+        let newWaitTime =
+            if waitTime <= currentConfig.MaxWaitTime then
+                waitTime
+            else
+                currentConfig.MaxWaitTime
+
+        { currentConfig with WaitTime = newWaitTime }
+
+    let internal retryAsyncInternal (sleep : int<millisecond> -> Async<unit>) retryConfig (f : unit -> RetryActionResult) = async {
+        let rec loop f retryConfig = async {
+            let result = f()
+            match result with
+            | Retry ->
+                do! sleep retryConfig.WaitTime
+                let newRetryConfig = nextRetryConfig retryConfig
+                return! loop f newRetryConfig
+            | NoRetry ->
+                ()
+        }
+
+        return! loop f retryConfig
+    }
+
+    let retryAsync retryConfig (f : unit -> RetryActionResult) = async {
+        return! retryAsyncInternal (fun x -> x |> (int >> Async.Sleep)) retryConfig f
+    }
+
 type TweetInfo = JsonProvider<tweetInfoSample, RootName = "tweet">
 
 module TwitterSource =
@@ -127,16 +171,8 @@ module TwitterSource =
     let private queueTweet (queue : BlockingQueueAgent<FavoritedTweet>) favoritedTweet =
         queue.Add(favoritedTweet)
         System.Console.WriteLine("tweet queued : {0}", favoritedTweet.TweetId)
-    
-    let run (queue : BlockingQueueAgent<FavoritedTweet>) = async {
-        let consumerKey = ConfigurationManager.AppSettings.Item("TwitterConsumerKey")
-        let consumerSecret = ConfigurationManager.AppSettings.Item("TwitterConsumerSecret")
-        let accessToken = ConfigurationManager.AppSettings.Item("TwitterAccessToken")
-        let accessTokenSecret = ConfigurationManager.AppSettings.Item("TwitterAccessSecret")
-        let token = Tokens.Create(consumerKey, consumerSecret, accessToken, accessTokenSecret)
 
-        System.Console.WriteLine("TwitterSource initialized")
-
+    let private processTweet (token : CoreTweet.Tokens) (queue : BlockingQueueAgent<FavoritedTweet>) =
         token.Streaming.User()
         |> Seq.filter(fun msg -> msg :? Streaming.EventMessage)
         |> Seq.map(fun msg -> msg :?> Streaming.EventMessage)
@@ -145,6 +181,37 @@ module TwitterSource =
         |> Seq.filter withMedia
         |> Seq.map convertTweet
         |> Seq.iter (queueTweet queue)
+
+    let run (queue : BlockingQueueAgent<FavoritedTweet>)
+            (retryAsync : ExponentialBackoff.RetryConfig -> (unit -> ExponentialBackoff.RetryActionResult) -> Async<unit>) = async {
+        let consumerKey = ConfigurationManager.AppSettings.Item("TwitterConsumerKey")
+        let consumerSecret = ConfigurationManager.AppSettings.Item("TwitterConsumerSecret")
+        let accessToken = ConfigurationManager.AppSettings.Item("TwitterAccessToken")
+        let accessTokenSecret = ConfigurationManager.AppSettings.Item("TwitterAccessSecret")
+
+        let token = Tokens.Create(consumerKey, consumerSecret, accessToken, accessTokenSecret)
+
+        System.Console.WriteLine("TwitterSource initialized")
+
+        let retryConfig =
+            { ExponentialBackoff.WaitTime = Int32WithMeasure(1000)
+              ExponentialBackoff.MaxWaitTime = Int32WithMeasure(15 * 60 * 1000) }
+
+        let f () =
+            let startTime = DateTime.UtcNow
+            try
+                processTweet token queue
+                ExponentialBackoff.NoRetry
+            with
+            | :? System.Net.WebException ->
+                let curTime = DateTime.UtcNow
+                let diff = curTime.Subtract(startTime)
+                match (int diff.TotalSeconds) with
+                | x when x <= (int retryConfig.MaxWaitTime) + 5000 -> ExponentialBackoff.Retry
+                | _ -> ExponentialBackoff.NoRetry
+
+        while true do
+            do! (retryAsync retryConfig) f
     }
 
 module DropboxSink =
@@ -249,12 +316,14 @@ module DropboxSink =
             let! tweetFolderPath = createTweetFolderAsync client tweet
             do! saveFavoritedTweetAsync client tweetFolderPath tweet
     }
+
+open ExponentialBackoff
         
 [<EntryPoint>]
 let main _ = 
     let queue = new BlockingQueueAgent<FavoritedTweet>(100)
 
-    [TwitterSource.run queue; DropboxSink.run queue]
+    [TwitterSource.run queue retryAsync; DropboxSink.run queue]
     |> Async.Parallel
     |> Async.RunSynchronously
     |> ignore
