@@ -11,6 +11,16 @@ open System.Configuration
 open System.IO
 open System.Text
 
+module Logging =
+    type Severity =
+    | Information
+    | Warning
+    | Error
+    | Debug
+
+    let log severity (message : string) =
+        System.Console.WriteLine(message) 
+
 type PhotoMedium = {
     Url : string
 }
@@ -168,11 +178,11 @@ module TwitterSource =
         [tweet.Entities; tweet.ExtendedEntities]
         |> List.forall isMediaInEntities
 
-    let private queueTweet (queue : BlockingQueueAgent<FavoritedTweet>) favoritedTweet =
+    let private queueTweet (log : Logging.Severity -> string -> unit) (queue : BlockingQueueAgent<FavoritedTweet>) favoritedTweet =
         queue.Add(favoritedTweet)
-        System.Console.WriteLine("tweet queued : {0}", favoritedTweet.TweetId)
+        log Logging.Information (sprintf "tweet queued : %d" favoritedTweet.TweetId)
 
-    let private processTweet (token : CoreTweet.Tokens) (queue : BlockingQueueAgent<FavoritedTweet>) =
+    let private processTweet (log : Logging.Severity -> string -> unit) (token : CoreTweet.Tokens) (queue : BlockingQueueAgent<FavoritedTweet>) =
         token.Streaming.User()
         |> Seq.filter(fun msg -> msg :? Streaming.EventMessage)
         |> Seq.map(fun msg -> msg :?> Streaming.EventMessage)
@@ -180,9 +190,10 @@ module TwitterSource =
         |> Seq.map(fun msg -> msg.TargetStatus)
         |> Seq.filter withMedia
         |> Seq.map convertTweet
-        |> Seq.iter (queueTweet queue)
+        |> Seq.iter (queueTweet log queue)
 
-    let run (queue : BlockingQueueAgent<FavoritedTweet>)
+    let run (log : Logging.Severity -> string -> unit)
+            (queue : BlockingQueueAgent<FavoritedTweet>)
             (retryAsync : ExponentialBackoff.RetryConfig -> (unit -> ExponentialBackoff.RetryActionResult) -> Async<unit>) = async {
         let consumerKey = ConfigurationManager.AppSettings.Item("TwitterConsumerKey")
         let consumerSecret = ConfigurationManager.AppSettings.Item("TwitterConsumerSecret")
@@ -191,7 +202,7 @@ module TwitterSource =
 
         let token = Tokens.Create(consumerKey, consumerSecret, accessToken, accessTokenSecret)
 
-        System.Console.WriteLine("TwitterSource initialized")
+        log Logging.Information "TwitterSource initialized"
 
         let retryConfig =
             { ExponentialBackoff.WaitTime = Int32WithMeasure(1000)
@@ -200,7 +211,7 @@ module TwitterSource =
         let f () =
             let startTime = DateTime.UtcNow
             try
-                processTweet token queue
+                processTweet log token queue
                 ExponentialBackoff.NoRetry
             with
             | :? System.Net.WebException ->
@@ -302,7 +313,7 @@ module DropboxSink =
         |> ignore
     }
 
-    let run (queue : BlockingQueueAgent<FavoritedTweet>) = async {
+    let run (log : Logging.Severity -> string -> unit) (queue : BlockingQueueAgent<FavoritedTweet>) = async {
         let accessToken = ConfigurationManager.AppSettings.Item("DropboxAccessToken")
         use client = new DropboxClient(accessToken)
 
@@ -311,7 +322,7 @@ module DropboxSink =
         while true do
             let! tweet = queue.AsyncGet()
 
-            System.Console.WriteLine("got favorited tweet: {0}", tweet.TweetId)
+            log Logging.Information (sprintf "got favorited tweet: %d" tweet.TweetId)
 
             let! tweetFolderPath = createTweetFolderAsync client tweet
             do! saveFavoritedTweetAsync client tweetFolderPath tweet
@@ -323,7 +334,7 @@ open ExponentialBackoff
 let main _ = 
     let queue = new BlockingQueueAgent<FavoritedTweet>(100)
 
-    [TwitterSource.run queue retryAsync; DropboxSink.run queue]
+    [TwitterSource.run Logging.log queue retryAsync; DropboxSink.run Logging.log queue]
     |> Async.Parallel
     |> Async.RunSynchronously
     |> ignore
