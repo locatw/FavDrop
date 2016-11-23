@@ -1,11 +1,11 @@
-﻿open ExponentialBackoff
+﻿open FavDrop
+open FavDrop.ExponentialBackoff
 open FavDrop.Domain
 open FSharp.Control
 open Microsoft.Azure
 open System
 open System.Configuration
 
-        
 [<EntryPoint>]
 let main _ = 
     let storageConnectionString =

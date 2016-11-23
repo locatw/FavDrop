@@ -1,4 +1,4 @@
-﻿module DropboxSink
+﻿module FavDrop.DropboxSink
 
 open Dropbox.Api
 open FavDrop.Domain

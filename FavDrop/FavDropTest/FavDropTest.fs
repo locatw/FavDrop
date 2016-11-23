@@ -2,7 +2,7 @@
 
 open NUnit.Framework
 open Microsoft.FSharp.Core.LanguagePrimitives
-open ExponentialBackoff
+open FavDrop.ExponentialBackoff
 open FsUnit
 
 [<TestFixture>]

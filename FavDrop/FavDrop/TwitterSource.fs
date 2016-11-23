@@ -1,4 +1,4 @@
-﻿module TwitterSource
+﻿module FavDrop.TwitterSource
 
 open CoreTweet
 open FavDrop.Domain

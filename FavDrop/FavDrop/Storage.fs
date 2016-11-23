@@ -1,4 +1,4 @@
-﻿module Storage
+﻿module FavDrop.Storage
 
 open Microsoft.WindowsAzure.Storage.Table
 open Microsoft.WindowsAzure.Storage

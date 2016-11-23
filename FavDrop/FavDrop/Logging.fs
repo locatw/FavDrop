@@ -1,4 +1,4 @@
-﻿module Logging
+﻿module FavDrop.Logging
 
 open System
 open Microsoft.WindowsAzure.Storage.Table

@@ -1,4 +1,4 @@
-﻿module ExponentialBackoff
+﻿module FavDrop.ExponentialBackoff
 
 [<Measure>]
 type millisecond
