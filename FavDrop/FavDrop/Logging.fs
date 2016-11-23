@@ -92,5 +92,7 @@ type Logger(tableStorage : Storage.ITableStorage) =
             let record = { DateTime = DateTimeOffset.UtcNow; Severity = severity; Message = message }
             recordQueue.Add(record)
 
+type Log = Severity -> string -> unit
+
 let log (logger : ILogger) severity (message : string) =
     logger.Log severity message

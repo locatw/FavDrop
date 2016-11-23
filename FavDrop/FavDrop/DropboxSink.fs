@@ -95,7 +95,7 @@ let private saveFavoritedTweetAsync (client : DropboxClient) tweetFolderPath twe
     |> ignore
 }
 
-let run (log : Logging.Severity -> string -> unit) (queue : BlockingQueueAgent<FavoritedTweet>) = async {
+let run (log : Logging.Log) (queue : BlockingQueueAgent<FavoritedTweet>) = async {
     let accessToken = ConfigurationManager.AppSettings.Item("DropboxAccessToken")
     use client = new DropboxClient(accessToken)
 

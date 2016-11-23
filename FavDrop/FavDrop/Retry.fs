@@ -12,6 +12,8 @@ type RetryConfig = {
     MaxWaitTime : int<millisecond>
 }
 
+type RetryAsync = RetryConfig -> (unit -> RetryActionResult) -> Async<unit>
+
 let private nextRetryConfig currentConfig =
     let waitTime = 2 * currentConfig.WaitTime
     let newWaitTime =

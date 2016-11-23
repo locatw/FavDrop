@@ -62,11 +62,11 @@ let private withMedia (tweet : Status) =
     [tweet.Entities; tweet.ExtendedEntities]
     |> List.forall isMediaInEntities
 
-let private queueTweet (log : Logging.Severity -> string -> unit) (queue : BlockingQueueAgent<FavoritedTweet>) favoritedTweet =
+let private queueTweet (log : Logging.Log) (queue : BlockingQueueAgent<FavoritedTweet>) favoritedTweet =
     queue.Add(favoritedTweet)
     log Logging.Information (sprintf "tweet queued : %d" favoritedTweet.TweetId)
 
-let private processTweet (log : Logging.Severity -> string -> unit) (token : CoreTweet.Tokens) (queue : BlockingQueueAgent<FavoritedTweet>) =
+let private processTweet (log : Logging.Log) (token : CoreTweet.Tokens) (queue : BlockingQueueAgent<FavoritedTweet>) =
     token.Streaming.User()
     |> Seq.filter(fun msg -> msg :? Streaming.EventMessage)
     |> Seq.map(fun msg -> msg :?> Streaming.EventMessage)
@@ -76,9 +76,7 @@ let private processTweet (log : Logging.Severity -> string -> unit) (token : Cor
     |> Seq.map convertTweet
     |> Seq.iter (queueTweet log queue)
 
-let run (log : Logging.Severity -> string -> unit)
-        (queue : BlockingQueueAgent<FavoritedTweet>)
-        (retryAsync : ExponentialBackoff.RetryConfig -> (unit -> ExponentialBackoff.RetryActionResult) -> Async<unit>) = async {
+let run (log : Logging.Log) (queue : BlockingQueueAgent<FavoritedTweet>) (retryAsync : ExponentialBackoff.RetryAsync) = async {
     let consumerKey = ConfigurationManager.AppSettings.Item("TwitterConsumerKey")
     let consumerSecret = ConfigurationManager.AppSettings.Item("TwitterConsumerSecret")
     let accessToken = ConfigurationManager.AppSettings.Item("TwitterAccessToken")
