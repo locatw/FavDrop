@@ -58,6 +58,12 @@
   <Import Project="$(FSharpTargetsPath)" />
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
+    <Compile Include="Retry.fs" />
+    <Compile Include="Storage.fs" />
+    <Compile Include="Logging.fs" />
+    <Compile Include="Domain.fs" />
+    <Compile Include="TwitterSource.fs" />
+    <Compile Include="DropboxSink.fs" />
     <Compile Include="Program.fs" />
     <None Include="App.secret.config.template" />
     <Content Include="App.secret.config">
