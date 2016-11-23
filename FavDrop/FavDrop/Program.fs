@@ -5,11 +5,42 @@ open FSharp.Data.UnitSystems.SI.UnitNames
 open FSharpx
 open FSharpx.Option
 open FSharpx.Control
+open Microsoft.Azure
 open Microsoft.FSharp.Core.LanguagePrimitives
+open Microsoft.WindowsAzure.Storage
+open Microsoft.WindowsAzure.Storage.Table
 open System
+open System.Collections.Generic
 open System.Configuration
 open System.IO
 open System.Text
+
+module Storage =
+    exception InsertException of string * ITableEntity
+
+    type ITableStorage =
+        abstract member InsertAsync : ITableEntity -> System.Threading.Tasks.Task<TableResult>
+
+    type TableStorage (connectionString : string, tableName : string) as this =
+        let connectionString = connectionString
+        let tableName = tableName
+        let client =
+            let account = CloudStorageAccount.Parse(connectionString)
+            account.CreateCloudTableClient()
+        let table = client.GetTableReference(tableName)
+        do
+            table.CreateIfNotExists() |> ignore
+
+        member this.InsertAsync(record : ITableEntity) =
+            (this :> ITableStorage).InsertAsync record
+
+        interface ITableStorage with
+            member __.InsertAsync record =
+                try
+                    let insertOperation = TableOperation.Insert(record)
+                    table.ExecuteAsync(insertOperation)
+                with
+                | :? System.Exception as e -> raise (InsertException(e.ToString(), record))
 
 module Logging =
     type Severity =
@@ -17,9 +48,89 @@ module Logging =
     | Warning
     | Error
     | Debug
+    with
+        override this.ToString() =
+            match this with
+            | Information -> "Information"
+            | Warning -> "Warning"
+            | Error -> "Error"
+            | Debug -> "Debug"
 
-    let log severity (message : string) =
-        System.Console.WriteLine(message) 
+        static member MakeFromString(value : string) =
+            match value with
+            | "Information" -> Information
+            | "Warning" -> Warning
+            | "Error" -> Error
+            | "Debug" -> Debug
+
+    type private LogRecord = {
+        DateTime : DateTimeOffset
+        Severity  : Severity
+        Message : string
+    }
+
+    type LogRecordEntity (dateTime: DateTimeOffset, severity : Severity, message : string) as this =
+        inherit TableEntity()
+
+        let mutable dateTime = dateTime
+        let mutable severity = severity
+        let mutable message = message
+
+        do
+            let utcDateTime = DateTime.UtcNow
+            this.PartitionKey <-  utcDateTime.ToString("yyyy-MM")
+            this.RowKey <- (DateTime.MaxValue.Ticks - utcDateTime.Ticks).ToString("d19")
+
+        member this.DateTime
+            with get () = dateTime
+            and set (value) = dateTime <- value
+
+        member this.Severity
+            with get () = severity
+            and set (value) = severity <- value
+
+        member this.Message
+            with get () = message
+            and set (value) = message <- value
+
+        override this.WriteEntity(operationContext : OperationContext) : IDictionary<string, EntityProperty> =
+            let results = base.WriteEntity(operationContext)
+            results.Add("Severity", new EntityProperty(this.Severity.ToString()))
+            results
+
+        override this.ReadEntity(properties : IDictionary<string, EntityProperty>, operationContext : OperationContext) : unit =
+            base.ReadEntity(properties, operationContext)
+            this.Severity <- Severity.MakeFromString(properties.["Severity"].StringValue)
+
+    type ILogger =
+        abstract member Log : Severity -> string -> unit
+
+    type Logger(tableStorage : Storage.ITableStorage) =
+        let tableStorage = tableStorage
+        let recordQueue = new BlockingQueueAgent<LogRecord>(1000)
+
+        member this.Start() =
+            async {
+                while true do
+                    let! record = recordQueue.AsyncGet()
+                    // To avoid overlapping RowKey, create TableEntity after getting it from queue.
+                    let entity = new LogRecordEntity(DateTimeOffset.UtcNow, record.Severity, record.Message)
+                    tableStorage.InsertAsync(entity)
+                    |> Async.AwaitTask
+                    |> ignore
+            }
+            |> Async.Start
+
+        member this.Log severity message =
+            (this :> ILogger).Log severity message
+        
+        interface ILogger with
+            member this.Log severity (message : string) =
+                let record = { DateTime = DateTimeOffset.UtcNow; Severity = severity; Message = message }
+                recordQueue.Add(record)
+
+    let log (logger : ILogger) severity (message : string) =
+        logger.Log severity message
 
 type PhotoMedium = {
     Url : string
@@ -317,7 +428,7 @@ module DropboxSink =
         let accessToken = ConfigurationManager.AppSettings.Item("DropboxAccessToken")
         use client = new DropboxClient(accessToken)
 
-        System.Console.WriteLine("DropboxSink initialized")
+        log Logging.Information "DropboxSink initialized"
         
         while true do
             let! tweet = queue.AsyncGet()
@@ -332,11 +443,18 @@ open ExponentialBackoff
         
 [<EntryPoint>]
 let main _ = 
+    let storageConnectionString =
+        CloudConfigurationManager.GetSetting("StorageConnectionString")
     let queue = new BlockingQueueAgent<FavoritedTweet>(100)
+    let storage = new Storage.TableStorage(storageConnectionString, "FavDropAppLog")
+    let logger = new Logging.Logger(storage)
+    let log = Logging.log logger
 
-    [TwitterSource.run Logging.log queue retryAsync; DropboxSink.run Logging.log queue]
+    logger.Start()
+
+    [TwitterSource.run log queue retryAsync; DropboxSink.run log queue]
     |> Async.Parallel
     |> Async.RunSynchronously
     |> ignore
-
+    
     0
