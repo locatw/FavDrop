@@ -97,7 +97,7 @@ type Logger(tableStorage : Storage.ITableStorage, retryAsync : ExponentialBackof
             let! record = recordQueue.AsyncGet(1000)
             // To avoid overlapping RowKey, create TableEntity after getting it from queue.
             let entity = new LogRecordEntity(DateTimeOffset.UtcNow, record.Severity, record.Message)
-            do! retryAsync retryConfig (fun () -> insertAsync entity |> Async.RunSynchronously)
+            do! retryAsync retryConfig (fun () -> insertAsync entity)
         with
         | :? System.TimeoutException -> ()
     }

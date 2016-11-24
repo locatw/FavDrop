@@ -15,9 +15,10 @@ module RetryTest =
     let ``not retry when returned NoRetry`` () =
         let mutable calledCount = 0
 
-        let f () =
+        let f () = async {
             calledCount <- calledCount + 1
-            NoRetry
+            return NoRetry
+        }
         let initialRetryConfig =
             { WaitTime = Int32WithMeasure(1); MaxWaitTime = Int32WithMeasure(2) }
 
@@ -31,12 +32,13 @@ module RetryTest =
         let expectedCalledCount = 3
 
         let mutable calledCount = 0
-        let f () =
+        let f () = async {
             calledCount <- calledCount + 1
             if calledCount < expectedCalledCount then
-                Retry
+                return Retry
             else
-                NoRetry
+                return NoRetry
+        }
         let initialRetryConfig =
             { WaitTime = Int32WithMeasure(1); MaxWaitTime = Int32WithMeasure(2) }
 
@@ -50,12 +52,13 @@ module RetryTest =
         let funWithMaxTimes maxTimes =
             let mutable calledCount = 0
             fun () ->
-                let f () =
+                let f () = async {
                     calledCount <- calledCount + 1
                     if calledCount <= maxTimes then
-                        Retry
+                        return Retry
                     else
-                        NoRetry
+                        return NoRetry
+                }
                 f()
 
         let mutable actualWaitTimes = []
@@ -77,12 +80,13 @@ module RetryTest =
         let funWithMaxTimes maxTimes =
             let mutable calledCount = 0
             fun () ->
-                let f () =
+                let f () = async {
                     calledCount <- calledCount + 1
                     if calledCount <= maxTimes then
-                        Retry
+                        return Retry
                     else
-                        NoRetry
+                        return NoRetry
+                    }
                 f()
 
         let maxWaitTime = 10

@@ -90,18 +90,19 @@ let run (log : Logging.Log) (queue : BlockingQueueAgent<FavoritedTweet>) (retryA
         { ExponentialBackoff.WaitTime = Int32WithMeasure(1000)
           ExponentialBackoff.MaxWaitTime = Int32WithMeasure(15 * 60 * 1000) }
 
-    let f () =
+    let f () = async {
         let startTime = DateTime.UtcNow
         try
             processTweet log token queue
-            ExponentialBackoff.NoRetry
+            return ExponentialBackoff.NoRetry
         with
         | :? System.Net.WebException ->
             let curTime = DateTime.UtcNow
             let diff = curTime.Subtract(startTime)
             match (int diff.TotalSeconds) with
-            | x when x <= (int retryConfig.MaxWaitTime) + 5000 -> ExponentialBackoff.Retry
-            | _ -> ExponentialBackoff.NoRetry
+            | x when x <= (int retryConfig.MaxWaitTime) + 5000 -> return ExponentialBackoff.Retry
+            | _ -> return ExponentialBackoff.NoRetry
+    }
 
     while true do
         do! (retryAsync retryConfig) f

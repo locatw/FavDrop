@@ -12,7 +12,7 @@ type RetryConfig = {
     MaxWaitTime : int<millisecond>
 }
 
-type RetryAsync = RetryConfig -> (unit -> RetryActionResult) -> Async<unit>
+type RetryAsync = RetryConfig -> (unit -> Async<RetryActionResult>) -> Async<unit>
 
 let private nextRetryConfig currentConfig =
     let waitTime = 2 * currentConfig.WaitTime
@@ -24,9 +24,9 @@ let private nextRetryConfig currentConfig =
 
     { currentConfig with WaitTime = newWaitTime }
 
-let internal retryAsyncInternal (sleep : int<millisecond> -> Async<unit>) retryConfig (f : unit -> RetryActionResult) = async {
+let internal retryAsyncInternal (sleep : int<millisecond> -> Async<unit>) retryConfig (f : unit -> Async<RetryActionResult>) = async {
     let rec loop f retryConfig = async {
-        let result = f()
+        let! result = f()
         match result with
         | Retry ->
             do! sleep retryConfig.WaitTime
@@ -39,6 +39,6 @@ let internal retryAsyncInternal (sleep : int<millisecond> -> Async<unit>) retryC
     return! loop f retryConfig
 }
 
-let retryAsync retryConfig (f : unit -> RetryActionResult) = async {
+let retryAsync retryConfig (f : unit -> Async<RetryActionResult>) = async {
     return! retryAsyncInternal (fun x -> x |> (int >> Async.Sleep)) retryConfig f
 }
