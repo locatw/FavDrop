@@ -1,10 +1,11 @@
 ﻿module FavDrop.Logging
 
-open System
-open Microsoft.WindowsAzure.Storage.Table
-open Microsoft.WindowsAzure.Storage
-open System.Collections.Generic
 open FSharp.Control
+open Microsoft.FSharp.Core.LanguagePrimitives
+open Microsoft.WindowsAzure.Storage
+open Microsoft.WindowsAzure.Storage.Table
+open System
+open System.Collections.Generic
 
 type Severity =
 | Information
@@ -68,29 +69,85 @@ type LogRecordEntity (dateTime: DateTimeOffset, severity : Severity, message : s
 type ILogger =
     abstract member Log : Severity -> string -> unit
 
-type Logger(tableStorage : Storage.ITableStorage) =
+type Logger(tableStorage : Storage.ITableStorage, retryAsync : ExponentialBackoff.RetryAsync) =
     let tableStorage = tableStorage
     let recordQueue = new BlockingQueueAgent<LogRecord>(1000)
+    let cancelledEvent = new System.Threading.AutoResetEvent(false)
+    let mutable disposed = false
+    let mutable cancellationTokenSource = new System.Threading.CancellationTokenSource()
+
+    let retryConfig =
+        { ExponentialBackoff.WaitTime = Int32WithMeasure(1000)
+          ExponentialBackoff.MaxWaitTime = Int32WithMeasure(15 * 60 * 1000) }
+
+    let insertAsync entity = async {
+        let isSuccessCode code = 200 <= code && code < 300
+
+        try
+            let! result = tableStorage.InsertAsync(entity) |> Async.AwaitTask
+            match result.HttpStatusCode with
+            | code when isSuccessCode code -> return ExponentialBackoff.NoRetry
+            | _ -> return ExponentialBackoff.Retry
+        with
+        | Storage.InsertException(_) -> return ExponentialBackoff.Retry
+    }
+    let storeLogAsync () = async {
+        try
+            // specify timeout for cancelling
+            let! record = recordQueue.AsyncGet(1000)
+            // To avoid overlapping RowKey, create TableEntity after getting it from queue.
+            let entity = new LogRecordEntity(DateTimeOffset.UtcNow, record.Severity, record.Message)
+            do! retryAsync retryConfig (fun () -> insertAsync entity |> Async.RunSynchronously)
+        with
+        | :? System.TimeoutException -> ()
+    }
+
+    let rec storeLogLoop () = async {
+        do! storeLogAsync()
+        return! storeLogLoop()
+    } 
 
     member this.Start() =
-        async {
-            while true do
-                let! record = recordQueue.AsyncGet()
-                // To avoid overlapping RowKey, create TableEntity after getting it from queue.
-                let entity = new LogRecordEntity(DateTimeOffset.UtcNow, record.Severity, record.Message)
-                tableStorage.InsertAsync(entity)
-                |> Async.AwaitTask
-                |> ignore
-        }
-        |> Async.Start
+        cancellationTokenSource <- new System.Threading.CancellationTokenSource()
+
+        Async.Start(
+            async {
+                try
+                    return! storeLogLoop()
+                finally
+                    cancelledEvent.Set() |> ignore
+            }, cancellationTokenSource.Token)
+
+    member this.Cancel () =
+        cancellationTokenSource.Cancel()
+
+    member this.WaitForStop () =
+        Async.AwaitWaitHandle cancelledEvent
 
     member this.Log severity message =
         (this :> ILogger).Log severity message
+
+    member this.Dispose(disposing : bool) =
+        match (disposed, disposing) with
+        | true, _ ->
+            ()
+        | _, true ->
+            cancellationTokenSource.Dispose()
+            cancelledEvent.Dispose()
+            disposed <- true
+        | _, false ->
+            disposed <- true
     
     interface ILogger with
         member this.Log severity (message : string) =
             let record = { DateTime = DateTimeOffset.UtcNow; Severity = severity; Message = message }
             recordQueue.Add(record)
+
+    interface IDisposable with
+        member this.Dispose() =
+            this.Dispose(true)
+            GC.SuppressFinalize(this)
+
 
 type Log = Severity -> string -> unit
 

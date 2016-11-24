@@ -12,7 +12,7 @@ let main _ =
         CloudConfigurationManager.GetSetting("StorageConnectionString")
     let queue = new BlockingQueueAgent<FavoritedTweet>(100)
     let storage = new Storage.TableStorage(storageConnectionString, "FavDropAppLog")
-    let logger = new Logging.Logger(storage)
+    let logger = new Logging.Logger(storage, retryAsync)
     let log = Logging.log logger
 
     logger.Start()
