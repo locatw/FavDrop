@@ -2,6 +2,7 @@
 
 open FavDrop.ExponentialBackoff
 open FsUnit
+open Microsoft.FSharp.Core.LanguagePrimitives
 open Microsoft.WindowsAzure.Storage.Table
 open NUnit.Framework
 open System.Threading.Tasks
@@ -21,13 +22,17 @@ module LoggerTest =
                         result.HttpStatusCode <- 200
                         result) }
 
-        use logger = new Logger(emptyStorage, retryAsync)
-        logger.Start()
-        logger.Log Information "test"
-        Async.Sleep(100) |> Async.RunSynchronously
-        logger.Cancel()
+        let retryConfig =
+            { WaitTime = Int32WithMeasure(1)
+              MaxWaitTime = Int32WithMeasure(1) }
+        use logContext = makeContext emptyStorage retryAsync retryConfig
 
-        Async.RunSynchronously (logger.WaitForStop() |> Async.Ignore)
+        run logContext |> Async.Start
+        log logContext Information "test"
+
+        Async.Sleep(100) |> Async.RunSynchronously
+
+        cancel logContext
 
         storedEntities
         |> List.map (fun entity -> (entity :?> LogRecordEntity).Message)

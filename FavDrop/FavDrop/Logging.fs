@@ -1,10 +1,10 @@
 ﻿module FavDrop.Logging
 
 open FSharp.Control
-open Microsoft.FSharp.Core.LanguagePrimitives
 open Microsoft.WindowsAzure.Storage
 open Microsoft.WindowsAzure.Storage.Table
 open System
+open System.Collections.Concurrent
 open System.Collections.Generic
 
 type Severity =
@@ -26,12 +26,6 @@ with
         | "Warning" -> Warning
         | "Error" -> Error
         | "Debug" -> Debug
-
-type private LogRecord = {
-    DateTime : DateTimeOffset
-    Severity  : Severity
-    Message : string
-}
 
 type LogRecordEntity (dateTime: DateTimeOffset, severity : Severity, message : string) as this =
     inherit TableEntity()
@@ -66,90 +60,107 @@ type LogRecordEntity (dateTime: DateTimeOffset, severity : Severity, message : s
         base.ReadEntity(properties, operationContext)
         this.Severity <- Severity.MakeFromString(properties.["Severity"].StringValue)
 
-type ILogger =
-    abstract member Log : Severity -> string -> unit
+type ILogContext =
+    inherit IDisposable
 
-type Logger(tableStorage : Storage.ITableStorage, retryAsync : ExponentialBackoff.RetryAsync) =
-    let tableStorage = tableStorage
-    let recordQueue = new BlockingQueueAgent<LogRecord>(1000)
-    let cancelledEvent = new System.Threading.AutoResetEvent(false)
-    let mutable disposed = false
-    let mutable cancellationTokenSource = new System.Threading.CancellationTokenSource()
+type Log = Severity -> string -> unit
 
-    let retryConfig =
-        { ExponentialBackoff.WaitTime = Int32WithMeasure(1000)
-          ExponentialBackoff.MaxWaitTime = Int32WithMeasure(15 * 60 * 1000) }
+type private LogRecord = {
+    DateTime : DateTimeOffset
+    Severity  : Severity
+    Message : string
+}
 
-    let insertAsync entity = async {
+[<NoComparison>]
+[<NoEquality>]
+type private LogContext =
+    {
+        Storage : Storage.ITableStorage
+        RecordQueue : ConcurrentQueue<LogRecord>
+        RetryAsync : ExponentialBackoff.RetryAsync
+        RetryConfig : ExponentialBackoff.RetryConfig
+        CancellationTokenSource : System.Threading.CancellationTokenSource
+        mutable Disposed : bool
+    }
+    interface ILogContext
+    interface IDisposable with
+        member this.Dispose() =
+            if this.Disposed then
+                ()
+            else
+                this.CancellationTokenSource.Dispose()
+                this.Disposed <- true
+            GC.SuppressFinalize(this)
+
+let private insert context entity =
+    async {
         let isSuccessCode code = 200 <= code && code < 300
 
         try
-            let! result = tableStorage.InsertAsync(entity) |> Async.AwaitTask
+            let! result = context.Storage.InsertAsync(entity) |> Async.AwaitTask
             match result.HttpStatusCode with
             | code when isSuccessCode code -> return ExponentialBackoff.NoRetry
             | _ -> return ExponentialBackoff.Retry
         with
         | Storage.InsertException(_) -> return ExponentialBackoff.Retry
     }
-    let storeLogAsync () = async {
+
+let private storeLog context =
+    async {
         try
-            // specify timeout for cancelling
-            let! record = recordQueue.AsyncGet(1000)
-            // To avoid overlapping RowKey, create TableEntity after getting it from queue.
-            let entity = new LogRecordEntity(DateTimeOffset.UtcNow, record.Severity, record.Message)
-            do! retryAsync retryConfig (fun () -> insertAsync entity)
+            let (isSucceeded, record) = context.RecordQueue.TryDequeue()
+            match isSucceeded with
+            | true ->
+                // To avoid overlapping RowKey, create TableEntity after getting it from queue.
+                let entity = new LogRecordEntity(DateTimeOffset.UtcNow, record.Severity, record.Message)
+                do! context.RetryAsync context.RetryConfig (fun () -> insert context entity)
+            | false ->
+                do! Async.Sleep(1000)
         with
-        | :? System.TimeoutException -> ()
+        | :? System.TimeoutException ->
+            ()
     }
 
-    let rec storeLogLoop () = async {
-        do! storeLogAsync()
-        return! storeLogLoop()
-    } 
+let rec private storeLogLoop context =
+    async {
+        match context.CancellationTokenSource.IsCancellationRequested with
+        | true -> return ()
+        | false ->
+            do! storeLog context
+            return! storeLogLoop context
+    }
 
-    member this.Start() =
-        cancellationTokenSource <- new System.Threading.CancellationTokenSource()
+let private checkContextArgument (context : ILogContext) =
+    if not (context :? LogContext) then
+        raise (System.ArgumentException("context must be a returned value by makeContext"))
 
-        Async.Start(
-            async {
-                try
-                    return! storeLogLoop()
-                finally
-                    cancelledEvent.Set() |> ignore
-            }, cancellationTokenSource.Token)
+let makeContext storage retryAsync retryConfig =
+    { Storage = storage
+      RecordQueue = new ConcurrentQueue<LogRecord>()
+      RetryAsync = retryAsync
+      RetryConfig = retryConfig
+      CancellationTokenSource = new System.Threading.CancellationTokenSource()
+      Disposed = false }
+    :> ILogContext
 
-    member this.Cancel () =
-        cancellationTokenSource.Cancel()
+let run (context : ILogContext) =
+    checkContextArgument context
 
-    member this.WaitForStop () =
-        Async.AwaitWaitHandle cancelledEvent
+    async {
+        let! result = storeLogLoop (context :?> LogContext)
+        return result
+    }
 
-    member this.Log severity message =
-        (this :> ILogger).Log severity message
+let cancel (context : ILogContext) =
+    checkContextArgument context
 
-    member this.Dispose(disposing : bool) =
-        match (disposed, disposing) with
-        | true, _ ->
-            ()
-        | _, true ->
-            cancellationTokenSource.Dispose()
-            cancelledEvent.Dispose()
-            disposed <- true
-        | _, false ->
-            disposed <- true
-    
-    interface ILogger with
-        member this.Log severity (message : string) =
-            let record = { DateTime = DateTimeOffset.UtcNow; Severity = severity; Message = message }
-            recordQueue.Add(record)
+    let ctx = context :?> LogContext
+    ctx.CancellationTokenSource.Cancel()
 
-    interface IDisposable with
-        member this.Dispose() =
-            this.Dispose(true)
-            GC.SuppressFinalize(this)
+let log (context : ILogContext) severity message =
+    checkContextArgument context
 
+    let ctx = context :?> LogContext
+    let record = { DateTime = DateTimeOffset.UtcNow; Severity = severity; Message = message }
+    ctx.RecordQueue.Enqueue(record)
 
-type Log = Severity -> string -> unit
-
-let log (logger : ILogger) severity (message : string) =
-    logger.Log severity message
