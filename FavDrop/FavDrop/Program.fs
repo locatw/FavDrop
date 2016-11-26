@@ -21,7 +21,7 @@ let main _ =
 
     Logging.run logContext |> Async.Start
 
-    [TwitterSource.run log queue retryAsync; DropboxSink.run log queue]
+    [TwitterSource.run log queue retryAsync; DropboxSink.run log queue retryAsync]
     |> Async.Parallel
     |> Async.RunSynchronously
     |> ignore

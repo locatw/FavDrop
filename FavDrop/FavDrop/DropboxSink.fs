@@ -1,8 +1,10 @@
 ﻿module FavDrop.DropboxSink
 
 open Dropbox.Api
+open Dropbox.Api.Files
 open FavDrop.Domain
 open FSharp.Data
+open Microsoft.FSharp.Core.LanguagePrimitives
 open System.Collections.Concurrent
 open System.Configuration
 open System.IO
@@ -95,13 +97,8 @@ let private saveFavoritedTweetAsync (client : DropboxClient) tweetFolderPath twe
     |> ignore
 }
 
-let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) = async {
-    let accessToken = ConfigurationManager.AppSettings.Item("DropboxAccessToken")
-    use client = new DropboxClient(accessToken)
-
-    log Logging.Information "DropboxSink initialized"
-    
-    while true do
+let private storeTweet (client : DropboxClient) (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) = async {
+    try
         let (isScceeded, tweet) = queue.TryDequeue()
         match isScceeded with
         | true ->
@@ -111,4 +108,29 @@ let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) = async {
             do! saveFavoritedTweetAsync client tweetFolderPath tweet
         | false ->
             do! Async.Sleep(1000)
+        return ExponentialBackoff.NoRetry
+    with
+    | :? ApiException<CreateFolderError> as e ->
+        log Logging.Error (e.ToString())
+        return ExponentialBackoff.Retry
+    | :? ApiException<UploadError> as e ->
+        log Logging.Error (e.ToString())
+        return ExponentialBackoff.Retry
+    | :? System.Exception as e ->
+        log Logging.Error (e.ToString())
+        return ExponentialBackoff.Retry
+}
+
+let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsync : ExponentialBackoff.RetryAsync) = async {
+    let accessToken = ConfigurationManager.AppSettings.Item("DropboxAccessToken")
+    use client = new DropboxClient(accessToken)
+
+    log Logging.Information "DropboxSink initialized"
+
+    let retryConfig =
+        { ExponentialBackoff.WaitTime = Int32WithMeasure(1000)
+          ExponentialBackoff.MaxWaitTime = Int32WithMeasure(15 * 60 * 1000) }
+    
+    while true do
+        do! retryAsync retryConfig (fun () -> storeTweet client log queue)
 }
