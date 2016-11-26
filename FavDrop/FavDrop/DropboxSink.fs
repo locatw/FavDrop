@@ -2,8 +2,8 @@
 
 open Dropbox.Api
 open FavDrop.Domain
-open FSharp.Control
 open FSharp.Data
+open System.Collections.Concurrent
 open System.Configuration
 open System.IO
 open System.Text
@@ -95,17 +95,20 @@ let private saveFavoritedTweetAsync (client : DropboxClient) tweetFolderPath twe
     |> ignore
 }
 
-let run (log : Logging.Log) (queue : BlockingQueueAgent<FavoritedTweet>) = async {
+let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) = async {
     let accessToken = ConfigurationManager.AppSettings.Item("DropboxAccessToken")
     use client = new DropboxClient(accessToken)
 
     log Logging.Information "DropboxSink initialized"
     
     while true do
-        let! tweet = queue.AsyncGet()
+        let (isScceeded, tweet) = queue.TryDequeue()
+        match isScceeded with
+        | true ->
+            log Logging.Information (sprintf "got favorited tweet: %d" tweet.TweetId)
 
-        log Logging.Information (sprintf "got favorited tweet: %d" tweet.TweetId)
-
-        let! tweetFolderPath = createTweetFolderAsync client tweet
-        do! saveFavoritedTweetAsync client tweetFolderPath tweet
+            let! tweetFolderPath = createTweetFolderAsync client tweet
+            do! saveFavoritedTweetAsync client tweetFolderPath tweet
+        | false ->
+            do! Async.Sleep(1000)
 }

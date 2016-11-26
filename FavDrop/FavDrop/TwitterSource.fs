@@ -2,11 +2,11 @@
 
 open CoreTweet
 open FavDrop.Domain
-open FSharp.Control
 open FSharpx
 open FSharpx.Option
 open Microsoft.FSharp.Core.LanguagePrimitives
 open System
+open System.Collections.Concurrent
 open System.Configuration
 
 let private convertPhotoMedium (media : CoreTweet.MediaEntity) =
@@ -62,11 +62,11 @@ let private withMedia (tweet : Status) =
     [tweet.Entities; tweet.ExtendedEntities]
     |> List.forall isMediaInEntities
 
-let private queueTweet (log : Logging.Log) (queue : BlockingQueueAgent<FavoritedTweet>) favoritedTweet =
-    queue.Add(favoritedTweet)
+let private queueTweet (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) favoritedTweet =
+    queue.Enqueue(favoritedTweet)
     log Logging.Information (sprintf "tweet queued : %d" favoritedTweet.TweetId)
 
-let private processTweet (log : Logging.Log) (token : CoreTweet.Tokens) (queue : BlockingQueueAgent<FavoritedTweet>) =
+let private processTweet (log : Logging.Log) (token : CoreTweet.Tokens) (queue : ConcurrentQueue<FavoritedTweet>) =
     token.Streaming.User()
     |> Seq.filter(fun msg -> msg :? Streaming.EventMessage)
     |> Seq.map(fun msg -> msg :?> Streaming.EventMessage)
@@ -76,7 +76,7 @@ let private processTweet (log : Logging.Log) (token : CoreTweet.Tokens) (queue :
     |> Seq.map convertTweet
     |> Seq.iter (queueTweet log queue)
 
-let run (log : Logging.Log) (queue : BlockingQueueAgent<FavoritedTweet>) (retryAsync : ExponentialBackoff.RetryAsync) = async {
+let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsync : ExponentialBackoff.RetryAsync) = async {
     let consumerKey = ConfigurationManager.AppSettings.Item("TwitterConsumerKey")
     let consumerSecret = ConfigurationManager.AppSettings.Item("TwitterConsumerSecret")
     let accessToken = ConfigurationManager.AppSettings.Item("TwitterAccessToken")

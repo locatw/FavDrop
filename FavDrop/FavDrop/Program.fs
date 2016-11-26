@@ -1,17 +1,17 @@
 ﻿open FavDrop
 open FavDrop.ExponentialBackoff
 open FavDrop.Domain
-open FSharp.Control
 open Microsoft.Azure
 open Microsoft.FSharp.Core.LanguagePrimitives
 open System
+open System.Collections.Concurrent
 open System.Configuration
 
 [<EntryPoint>]
 let main _ = 
     let storageConnectionString =
         CloudConfigurationManager.GetSetting("StorageConnectionString")
-    let queue = new BlockingQueueAgent<FavoritedTweet>(100)
+    let queue = new ConcurrentQueue<FavoritedTweet>()
     let storage = new Storage.TableStorage(storageConnectionString, "FavDropAppLog")
     let retryConfig =
         { ExponentialBackoff.WaitTime = Int32WithMeasure(1000)
