@@ -36,7 +36,7 @@ type FavoritedTweet = {
 // but JsonProvider doesn't support DateTimeOffset.
 // Insted, use string with timezone.
 [<Literal>]
-let tweetInfoSample = """
+let private TweetInfoSample = """
 {
   "format_version": "[version number]",
   "id": 1000000000000,
@@ -62,4 +62,4 @@ let tweetInfoSample = """
 }
 """
 
-type TweetInfo = JsonProvider<tweetInfoSample, RootName = "tweet">
+type TweetInfo = JsonProvider<TweetInfoSample, RootName = "tweet">
