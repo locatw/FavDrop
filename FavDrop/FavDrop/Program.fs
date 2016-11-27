@@ -1,9 +1,7 @@
 ﻿open FavDrop
 open FavDrop.ExponentialBackoff
 open FavDrop.Domain
-open Microsoft.Azure
 open Microsoft.FSharp.Core.LanguagePrimitives
-open System
 open System.Collections.Concurrent
 open System.Configuration
 
