@@ -76,34 +76,36 @@ let private processTweet (log : Logging.Log) (token : CoreTweet.Tokens) (queue :
     |> Seq.map convertTweet
     |> Seq.iter (queueTweet log queue)
 
-let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsync : ExponentialBackoff.RetryAsync) = async {
-    let consumerKey = ConfigurationManager.AppSettings.Item("TwitterConsumerKey")
-    let consumerSecret = ConfigurationManager.AppSettings.Item("TwitterConsumerSecret")
-    let accessToken = ConfigurationManager.AppSettings.Item("TwitterAccessToken")
-    let accessTokenSecret = ConfigurationManager.AppSettings.Item("TwitterAccessSecret")
+let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsync : ExponentialBackoff.RetryAsync) =
+    async {
+        let consumerKey = ConfigurationManager.AppSettings.Item("TwitterConsumerKey")
+        let consumerSecret = ConfigurationManager.AppSettings.Item("TwitterConsumerSecret")
+        let accessToken = ConfigurationManager.AppSettings.Item("TwitterAccessToken")
+        let accessTokenSecret = ConfigurationManager.AppSettings.Item("TwitterAccessSecret")
 
-    let token = Tokens.Create(consumerKey, consumerSecret, accessToken, accessTokenSecret)
+        let token = Tokens.Create(consumerKey, consumerSecret, accessToken, accessTokenSecret)
 
-    log Logging.Information "TwitterSource initialized"
+        log Logging.Information "TwitterSource initialized"
 
-    let retryConfig =
-        { ExponentialBackoff.WaitTime = Int32WithMeasure(1000)
-          ExponentialBackoff.MaxWaitTime = Int32WithMeasure(15 * 60 * 1000) }
+        let retryConfig =
+            { ExponentialBackoff.WaitTime = Int32WithMeasure(1000)
+              ExponentialBackoff.MaxWaitTime = Int32WithMeasure(15 * 60 * 1000) }
 
-    let f () = async {
-        let startTime = DateTime.UtcNow
-        try
-            processTweet log token queue
-            return ExponentialBackoff.NoRetry
-        with
-        | :? System.Net.WebException ->
-            let curTime = DateTime.UtcNow
-            let diff = curTime.Subtract(startTime)
-            match (int diff.TotalSeconds) with
-            | x when x <= (int retryConfig.MaxWaitTime) + 5000 -> return ExponentialBackoff.Retry
-            | _ -> return ExponentialBackoff.NoRetry
+        let f () =
+            async {
+                let startTime = DateTime.UtcNow
+                try
+                    processTweet log token queue
+                    return ExponentialBackoff.NoRetry
+                with
+                | :? System.Net.WebException ->
+                    let curTime = DateTime.UtcNow
+                    let diff = curTime.Subtract(startTime)
+                    match (int diff.TotalSeconds) with
+                    | x when x <= (int retryConfig.MaxWaitTime) + 5000 -> return ExponentialBackoff.Retry
+                    | _ -> return ExponentialBackoff.NoRetry
+            }
+
+        while true do
+            do! (retryAsync retryConfig) f
     }
-
-    while true do
-        do! (retryAsync retryConfig) f
-}
