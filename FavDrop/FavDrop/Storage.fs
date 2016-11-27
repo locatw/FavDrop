@@ -8,7 +8,7 @@ exception InsertException of string * ITableEntity
 type ITableStorage =
     abstract member InsertAsync : ITableEntity -> System.Threading.Tasks.Task<TableResult>
 
-type TableStorage (connectionString : string, tableName : string) as this =
+type TableStorage (connectionString : string, tableName : string) =
     let connectionString = connectionString
     let tableName = tableName
     let client =

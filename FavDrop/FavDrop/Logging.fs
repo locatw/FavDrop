@@ -39,15 +39,15 @@ type LogRecordEntity (dateTime: DateTimeOffset, severity : Severity, message : s
         this.PartitionKey <-  utcDateTime.ToString("yyyy-MM")
         this.RowKey <- (DateTime.MaxValue.Ticks - utcDateTime.Ticks).ToString("d19")
 
-    member this.DateTime
+    member __.DateTime
         with get () = dateTime
         and set (value) = dateTime <- value
 
-    member this.Severity
+    member __.Severity
         with get () = severity
         and set (value) = severity <- value
 
-    member this.Message
+    member __.Message
         with get () = message
         and set (value) = message <- value
 
