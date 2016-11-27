@@ -10,7 +10,7 @@ open System.Configuration
 [<EntryPoint>]
 let main _ = 
     let storageConnectionString =
-        CloudConfigurationManager.GetSetting("StorageConnectionString")
+        ConfigurationManager.AppSettings.Item("StorageConnectionString")
     let queue = new ConcurrentQueue<FavoritedTweet>()
     let storage = new Storage.TableStorage(storageConnectionString, "FavDropAppLog")
     let retryConfig =
@@ -27,5 +27,5 @@ let main _ =
     |> ignore
 
     Logging.cancel logContext
-    
+
     0
