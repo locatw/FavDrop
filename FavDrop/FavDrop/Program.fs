@@ -6,7 +6,7 @@ open System.Collections.Concurrent
 open System.Configuration
 
 [<EntryPoint>]
-let main _ = 
+let main _ =
     let storageConnectionString =
         ConfigurationManager.AppSettings.Item("StorageConnectionString")
     let queue = new ConcurrentQueue<FavoritedTweet>()
@@ -17,13 +17,18 @@ let main _ =
     use logContext = Logging.makeContext storage retryAsync retryConfig
     let log = Logging.log logContext
 
-    Logging.run logContext |> Async.Start
+    try
+        try
+            Logging.run logContext |> Async.Start
 
-    [TwitterSource.run log queue retryAsync; DropboxSink.run log queue retryAsync]
-    |> Async.Parallel
-    |> Async.RunSynchronously
-    |> ignore
-
-    Logging.cancel logContext
+            [TwitterSource.run log queue retryAsync; DropboxSink.run log queue retryAsync]
+            |> Async.Parallel
+            |> Async.RunSynchronously
+            |> ignore
+        with
+        | :? System.Exception as e ->
+            log Logging.Error (sprintf "Unhandled exception occurred. Exception: %s" (e.ToString()))
+    finally
+        Logging.cancel logContext
 
     0

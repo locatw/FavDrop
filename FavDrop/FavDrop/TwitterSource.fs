@@ -98,12 +98,17 @@ let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsyn
                     processTweet log token queue
                     return ExponentialBackoff.NoRetry
                 with
-                | :? System.Net.WebException ->
+                | :? System.Net.WebException as e ->
+                    log Logging.Error (sprintf "Exception occurred in TwitterSource. Exception: %s" (e.ToString()))
+
                     let curTime = DateTime.UtcNow
                     let diff = curTime.Subtract(startTime)
                     match (int diff.TotalSeconds) with
                     | x when x <= (int retryConfig.MaxWaitTime) + 5000 -> return ExponentialBackoff.Retry
                     | _ -> return ExponentialBackoff.NoRetry
+                | :? System.Exception as e ->
+                    log Logging.Error (sprintf "Exception occurred in TwitterSource. Exception: %s" (e.ToString()))
+                    return ExponentialBackoff.NoRetry
             }
 
         while true do
