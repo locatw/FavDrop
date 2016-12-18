@@ -10,6 +10,21 @@ open System.Configuration
 open System.IO
 open System.Text
 
+type IDropboxFileClient =
+    abstract member CreateFolderAsync : string -> Async<Dropbox.Api.Files.FolderMetadata>
+
+    abstract member UploadAsync : CommitInfo -> Stream -> Async<Dropbox.Api.Files.FileMetadata>
+
+type DropboxFileClient(client : DropboxClient) =
+    let files = client.Files
+
+    interface IDropboxFileClient with
+        member __.CreateFolderAsync (path : string) =
+            files.CreateFolderAsync(path) |> Async.AwaitTask
+
+        member __.UploadAsync (commitInfo : CommitInfo) (body : Stream) =
+            files.UploadAsync(commitInfo, body) |> Async.AwaitTask
+
 [<NoComparison>]
 type DropboxFile =
 | TweetInfoFile of string
@@ -17,13 +32,11 @@ type DropboxFile =
 
 let private saveFolderPath = ""
 
-let private createTweetFolderAsync (client : DropboxClient) tweet =
+let private createTweetFolderAsync (client : IDropboxFileClient) tweet =
     async {
         let tweetFolderPath = saveFolderPath + "/" + tweet.TweetId.ToString()
 
-        client.Files.CreateFolderAsync(tweetFolderPath)
-        |> Async.AwaitTask
-        |> ignore
+        client.CreateFolderAsync tweetFolderPath |> ignore
 
         return tweetFolderPath
     }
@@ -35,14 +48,13 @@ let private makeMediaFilePath (tweetFolderPath : string) (mediaUrl : string) =
 let private makeTweetInfoFilePath tweetFolderPath =
     tweetFolderPath + "/" + "TweetInfo.json"
 
-let private saveMediumAsync (client : DropboxClient) (makeMediaFilePath : string -> string) (uri : System.Uri) =
+let private saveMediumAsync (client : IDropboxFileClient) (makeMediaFilePath : string -> string) (uri : System.Uri) =
     async {
         let url = uri.AbsoluteUri
         let! data = Http.AsyncRequestStream(url)
         let filePath = makeMediaFilePath url
-        do! client.Files.UploadAsync(filePath, Files.WriteMode.Overwrite.Instance, body = data.ResponseStream)
-                |> Async.AwaitTask
-                |> Async.Ignore
+        let commitInfo = new CommitInfo(filePath, WriteMode.Overwrite.Instance)
+        do! client.UploadAsync commitInfo data.ResponseStream |> Async.Ignore
     }
 
 let private makeMediaFiles tweet =
@@ -87,13 +99,12 @@ let private makeTweetInfo tweet =
 let private makeDropboxFiles tweet =
     (makeTweetInfo tweet) :: (makeMediaFiles tweet)
 
-let private saveTweetInfoAsync (client : DropboxClient) (makeTweetInfoFilePath : unit -> string) (tweetInfo: string) =
+let private saveTweetInfoAsync (client : IDropboxFileClient) (makeTweetInfoFilePath : unit -> string) (tweetInfo: string) =
     async {
         let filePath = makeTweetInfoFilePath()
+        let commitInfo = new CommitInfo(filePath, WriteMode.Overwrite.Instance)
         use memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(tweetInfo))
-        return! client.Files.UploadAsync(filePath, Files.WriteMode.Overwrite.Instance, body = memoryStream)
-                |> Async.AwaitTask
-                |> Async.Ignore
+        return! client.UploadAsync commitInfo memoryStream |> Async.Ignore
     }
 
 let private saveWithRetryAsync retryAsync log saveAsync =
@@ -133,7 +144,7 @@ let private saveFavoritedTweetAsync saveTweetInfoAsync saveMediumAsync tweet =
         |> ignore
     }
 
-let private storeTweet (client : DropboxClient) (log : Logging.Log) (retryAsync : (unit -> Async<ExponentialBackoff.RetryActionResult>) -> Async<unit>) (queue : ConcurrentQueue<FavoritedTweet>) =
+let private storeTweet (client : IDropboxFileClient) (log : Logging.Log) (retryAsync : (unit -> Async<ExponentialBackoff.RetryActionResult>) -> Async<unit>) (queue : ConcurrentQueue<FavoritedTweet>) =
     async {
         try
             let (isSucceeded, tweet) = queue.TryDequeue()
@@ -152,13 +163,8 @@ let private storeTweet (client : DropboxClient) (log : Logging.Log) (retryAsync 
             log Logging.Error (e.ToString())
     }
 
-let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsync : ExponentialBackoff.RetryAsync) =
+let run (log : Logging.Log) (client : IDropboxFileClient) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsync : ExponentialBackoff.RetryAsync) =
     async {
-        let accessToken = ConfigurationManager.AppSettings.Item("DropboxAccessToken")
-        use client = new DropboxClient(accessToken)
-
-        log Logging.Information "DropboxSink initialized"
-
         let retryConfig =
             { ExponentialBackoff.WaitTime = Int32WithMeasure(1000)
               ExponentialBackoff.MaxWaitTime = Int32WithMeasure(15 * 60 * 1000) }

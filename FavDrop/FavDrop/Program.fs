@@ -1,4 +1,5 @@
-﻿open FavDrop
+﻿open Dropbox.Api
+open FavDrop
 open FavDrop.ExponentialBackoff
 open FavDrop.Domain
 open Microsoft.FSharp.Core.LanguagePrimitives
@@ -17,11 +18,17 @@ let main _ =
     use logContext = Logging.makeContext storage retryAsync retryConfig
     let log = Logging.log logContext
 
+    let accessToken = ConfigurationManager.AppSettings.Item("DropboxAccessToken")
+    use dropboxClient = new DropboxClient(accessToken)
+    log Logging.Information "DropboxSink initialized"
+
+    let dropboxFileClient = new DropboxSink.DropboxFileClient(dropboxClient)
+
     try
         try
             Logging.run logContext |> Async.Start
 
-            [TwitterSource.run log queue retryAsync; DropboxSink.run log queue retryAsync]
+            [TwitterSource.run log queue retryAsync; DropboxSink.run log dropboxFileClient queue retryAsync]
             |> Async.Parallel
             |> Async.RunSynchronously
             |> ignore
