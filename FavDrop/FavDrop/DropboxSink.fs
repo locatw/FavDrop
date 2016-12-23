@@ -30,49 +30,12 @@ type DropboxFile =
 | TweetInfoFile of string
 | MediumFile of System.Uri
 
-let private saveFolderPath = ""
-
-let internal createTweetFolderAsync (client : IDropboxFileClient) tweet =
-    async {
-        let tweetFolderPath = saveFolderPath + "/" + tweet.TweetId.ToString()
-
-        client.CreateFolderAsync tweetFolderPath |> ignore
-
-        return tweetFolderPath
-    }
-
-let internal createTweetFolderWithRetryAsync (client : IDropboxFileClient) log retryConfig tweet =
-    async {
-        return! retryAsync retryConfig (fun () ->
-            async {
-                try
-                    let! tweetFolderPath = createTweetFolderAsync client tweet
-                    return ExponentialBackoff.Success tweetFolderPath
-                with
-                | :? ApiException<CreateFolderError> as e ->
-                    log Logging.Error (e.ToString())
-                    return ExponentialBackoff.Retry
-                | :? RateLimitException as e ->
-                    log Logging.Error (e.ToString())
-                    return ExponentialBackoff.Retry
-            })
-    }
-
 let private makeMediaFilePath (tweetFolderPath : string) (mediaUrl : string) =
     let fileName = mediaUrl .Split('/') |> Array.last
     tweetFolderPath + "/" + fileName
 
 let private makeTweetInfoFilePath tweetFolderPath =
     tweetFolderPath + "/" + "TweetInfo.json"
-
-let private saveMediumAsync (client : IDropboxFileClient) (makeMediaFilePath : string -> string) (uri : System.Uri) =
-    async {
-        let url = uri.AbsoluteUri
-        let! data = Http.AsyncRequestStream(url)
-        let filePath = makeMediaFilePath url
-        let commitInfo = new CommitInfo(filePath, WriteMode.Overwrite.Instance)
-        do! client.UploadAsync commitInfo data.ResponseStream |> Async.Ignore
-    }
 
 let private makeMediaFiles tweet =
     let makePhotoFile photo =
@@ -116,26 +79,62 @@ let private makeTweetInfo tweet =
 let private makeDropboxFiles tweet =
     (makeTweetInfo tweet) :: (makeMediaFiles tweet)
 
-let private saveTweetInfoAsync (client : IDropboxFileClient) (makeTweetInfoFilePath : unit -> string) (tweetInfo: string) =
+let internal createTweetFolderWithRetryAsync (client : IDropboxFileClient) log retryConfig tweet =
     async {
-        let filePath = makeTweetInfoFilePath()
-        let commitInfo = new CommitInfo(filePath, WriteMode.Overwrite.Instance)
-        use memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(tweetInfo))
-        return! client.UploadAsync commitInfo memoryStream |> Async.Ignore
-    }
-
-let private saveWithRetryAsync retryConfig log saveAsync =
-    async {
-        do! retryAsync retryConfig (fun () ->
+        return! retryAsync retryConfig (fun () ->
             async {
                 try
-                    do! saveAsync()
-                    return ExponentialBackoff.Success ()
+                    let tweetFolderPath = "/" + tweet.TweetId.ToString()
+
+                    client.CreateFolderAsync tweetFolderPath |> ignore
+
+                    return ExponentialBackoff.Success tweetFolderPath
                 with
                 | :? ApiException<CreateFolderError> as e ->
                     log Logging.Error (e.ToString())
                     return ExponentialBackoff.Retry
+                | :? RateLimitException as e ->
+                    log Logging.Error (e.ToString())
+                    return ExponentialBackoff.Retry
+            })
+    }
+
+let private downloadMediaAsync log retryConfig url =
+    async {
+        return! retryAsync retryConfig (fun () ->
+            async {
+                try
+                    let! response = Http.AsyncRequest(url)
+                    let data = match response.Body with
+                               | Binary x -> x
+                               | _ -> raise (new System.Exception("response body must be binary"))
+                    return Success data
+                with
+                | :? RateLimitException as e ->
+                    log Logging.Error (e.ToString())
+                    return ExponentialBackoff.Retry
+                | :? System.Net.WebException as e ->
+                    log Logging.Warning (e.ToString())
+                    return Retry
+                | :? System.Exception as e ->
+                    log Logging.Error (e.ToString())
+                    return ExponentialBackoff.Retry
+            })
+    }
+
+let private uploadAsync (client : IDropboxFileClient) log retryConfig filePath stream =
+    async {
+        do! retryAsync retryConfig (fun () ->
+            async {
+                try
+                    let commitInfo = new CommitInfo(filePath, WriteMode.Overwrite.Instance)
+                    do! client.UploadAsync commitInfo stream |> Async.Ignore
+                    return ExponentialBackoff.Success ()
+                with
                 | :? ApiException<UploadError> as e ->
+                    log Logging.Error (e.ToString())
+                    return ExponentialBackoff.Retry
+                | :? RateLimitException as e ->
                     log Logging.Error (e.ToString())
                     return ExponentialBackoff.Retry
                 | :? System.Exception as e ->
@@ -144,40 +143,39 @@ let private saveWithRetryAsync retryConfig log saveAsync =
             })
     }
 
-let private saveTweetInfoWithRetryAsync client retryConfig log tweetFolderPath tweetInfo =
-    saveWithRetryAsync retryConfig log (fun () -> saveTweetInfoAsync client tweetFolderPath tweetInfo)
+let private saveTweetInfoAsync uploadAsync tweetFolderPath (tweetInfo : string) =
+    async {
+        let filePath = makeTweetInfoFilePath tweetFolderPath
+        use memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(tweetInfo))
+        do! uploadAsync filePath memoryStream
+    }
 
-let private saveMediumWithRetryAsync client retryConfig log (makeMediaFilePath : string -> string) (uri : System.Uri) =
-    saveWithRetryAsync retryConfig log (fun () -> saveMediumAsync client makeMediaFilePath uri)
+let private saveMediumAsync uploadAsync (downloadMediaAsync : string -> Async<byte[]>) tweetFolderPath (uri : System.Uri) =
+    async {
+        let uri = uri.AbsoluteUri
+        let filePath = makeMediaFilePath tweetFolderPath uri
+        let! data = downloadMediaAsync uri
+        do! uploadAsync filePath (new MemoryStream(data))
+    }
 
-let private saveFavoritedTweetAsync saveTweetInfoAsync saveMediumAsync tweet =
+let private saveFavoritedTweetAsync uploadAsync downloadMediaAsync tweetFolderPath tweet =
     async {
         makeDropboxFiles tweet
         |> List.map (function
-                     | TweetInfoFile file -> saveTweetInfoAsync file
-                     | MediumFile file -> saveMediumAsync file)
+                     | TweetInfoFile file -> saveTweetInfoAsync uploadAsync tweetFolderPath file
+                     | MediumFile uri -> saveMediumAsync uploadAsync downloadMediaAsync tweetFolderPath uri)
         |> Async.Parallel
         |> Async.RunSynchronously
         |> ignore
     }
 
-let private storeTweet (client : IDropboxFileClient) (log : Logging.Log) retryConfig (queue : ConcurrentQueue<FavoritedTweet>) =
+let private storeTweet (client : IDropboxFileClient) (log : Logging.Log) retryConfig tweet =
     async {
-        try
-            let (isSucceeded, tweet) = queue.TryDequeue()
-            if isSucceeded then
-                log Logging.Information (sprintf "got favorited tweet: %d" tweet.TweetId)
+        let downloadMediaAsync = downloadMediaAsync log retryConfig
+        let uploadAsync = uploadAsync client log retryConfig
 
-                let! tweetFolderPath = createTweetFolderWithRetryAsync client log retryConfig tweet
-                let saveTweetInfoAsync = saveTweetInfoWithRetryAsync client retryConfig log (fun () -> makeTweetInfoFilePath tweetFolderPath)
-                let saveMediumAsync = saveMediumWithRetryAsync client retryConfig log (makeMediaFilePath tweetFolderPath)
-
-                do! saveFavoritedTweetAsync saveTweetInfoAsync saveMediumAsync tweet
-            else
-                do! Async.Sleep(1000)
-        with
-        | :? System.Exception as e ->
-            log Logging.Error (e.ToString())
+        let! tweetFolderPath = createTweetFolderWithRetryAsync client log retryConfig tweet
+        do! saveFavoritedTweetAsync uploadAsync downloadMediaAsync tweetFolderPath tweet
     }
 
 let run (log : Logging.Log) (client : IDropboxFileClient) (queue : ConcurrentQueue<FavoritedTweet>) retryConfig =
@@ -187,5 +185,15 @@ let run (log : Logging.Log) (client : IDropboxFileClient) (queue : ConcurrentQue
               ExponentialBackoff.MaxWaitTime = Int32WithMeasure(15 * 60 * 1000) }
         
         while true do
-            do! storeTweet client log retryConfig queue
+            try
+                let (isSucceeded, tweet) = queue.TryDequeue()
+                if isSucceeded then
+                    log Logging.Information (sprintf "got favorited tweet: %d" tweet.TweetId)
+
+                    do! storeTweet client log retryConfig tweet
+                else
+                    do! Async.Sleep(1000)
+            with
+            | :? System.Exception as e ->
+                log Logging.Error (e.ToString())
     }

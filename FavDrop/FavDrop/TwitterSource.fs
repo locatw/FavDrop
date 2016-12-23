@@ -112,5 +112,7 @@ let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsyn
             }
 
         while true do
+            log Logging.Debug "one process start"
             do! (retryAsync retryConfig) f
+            log Logging.Debug "one process end"
     }
