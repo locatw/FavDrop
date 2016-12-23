@@ -41,6 +41,23 @@ let internal createTweetFolderAsync (client : IDropboxFileClient) tweet =
         return tweetFolderPath
     }
 
+let internal createTweetFolderWithRetryAsync (client : IDropboxFileClient) log retryConfig tweet =
+    async {
+        return! retryAsync retryConfig (fun () ->
+            async {
+                try
+                    let! tweetFolderPath = createTweetFolderAsync client tweet
+                    return ExponentialBackoff.Success tweetFolderPath
+                with
+                | :? ApiException<CreateFolderError> as e ->
+                    log Logging.Error (e.ToString())
+                    return ExponentialBackoff.Retry
+                | :? RateLimitException as e ->
+                    log Logging.Error (e.ToString())
+                    return ExponentialBackoff.Retry
+            })
+    }
+
 let private makeMediaFilePath (tweetFolderPath : string) (mediaUrl : string) =
     let fileName = mediaUrl .Split('/') |> Array.last
     tweetFolderPath + "/" + fileName
@@ -151,7 +168,7 @@ let private storeTweet (client : IDropboxFileClient) (log : Logging.Log) retryCo
             if isSucceeded then
                 log Logging.Information (sprintf "got favorited tweet: %d" tweet.TweetId)
 
-                let! tweetFolderPath = createTweetFolderAsync client tweet
+                let! tweetFolderPath = createTweetFolderWithRetryAsync client log retryConfig tweet
                 let saveTweetInfoAsync = saveTweetInfoWithRetryAsync client retryConfig log (fun () -> makeTweetInfoFilePath tweetFolderPath)
                 let saveMediumAsync = saveMediumWithRetryAsync client retryConfig log (makeMediaFilePath tweetFolderPath)
 
