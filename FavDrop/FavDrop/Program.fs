@@ -23,12 +23,15 @@ let main _ =
     log Logging.Information "DropboxSink initialized"
 
     let dropboxFileClient = new DropboxSink.DropboxFileClient(dropboxClient)
+    let retryConfig =
+        { ExponentialBackoff.WaitTime = Int32WithMeasure(1000)
+          ExponentialBackoff.MaxWaitTime = Int32WithMeasure(15 * 60 * 1000) }
 
     try
         try
             Logging.run logContext |> Async.Start
 
-            [TwitterSource.run log queue retryAsync; DropboxSink.run log dropboxFileClient queue retryAsync]
+            [TwitterSource.run log queue retryAsync; DropboxSink.run log dropboxFileClient queue retryConfig]
             |> Async.Parallel
             |> Async.RunSynchronously
             |> ignore

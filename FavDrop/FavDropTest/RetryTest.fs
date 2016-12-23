@@ -9,7 +9,8 @@ open FsUnit
 module RetryTest =
     let private asyncSleepStub x = async { return () }
 
-    let private noWaitRetryAsync = retryAsyncInternal asyncSleepStub
+    let private noWaitRetryAsync : RetryConfig -> (unit -> Async<RetryActionResult<unit>>) -> Async<unit> =
+        retryAsyncInternal asyncSleepStub
 
     [<Test>]
     let ``not retry when returned NoRetry`` () =
@@ -17,7 +18,7 @@ module RetryTest =
 
         let f () = async {
             calledCount <- calledCount + 1
-            return NoRetry
+            return Success()
         }
         let initialRetryConfig =
             { WaitTime = Int32WithMeasure(1); MaxWaitTime = Int32WithMeasure(2) }
@@ -37,7 +38,7 @@ module RetryTest =
             if calledCount < expectedCalledCount then
                 return Retry
             else
-                return NoRetry
+                return Success()
         }
         let initialRetryConfig =
             { WaitTime = Int32WithMeasure(1); MaxWaitTime = Int32WithMeasure(2) }
@@ -57,7 +58,7 @@ module RetryTest =
                     if calledCount <= maxTimes then
                         return Retry
                     else
-                        return NoRetry
+                        return Success()
                 }
                 f()
 
@@ -85,7 +86,7 @@ module RetryTest =
                     if calledCount <= maxTimes then
                         return Retry
                     else
-                        return NoRetry
+                        return Success()
                     }
                 f()
 

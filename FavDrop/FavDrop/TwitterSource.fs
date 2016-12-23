@@ -76,7 +76,7 @@ let private processTweet (log : Logging.Log) (token : CoreTweet.Tokens) (queue :
     |> Seq.map convertTweet
     |> Seq.iter (queueTweet log queue)
 
-let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsync : ExponentialBackoff.RetryAsync) =
+let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsync : ExponentialBackoff.RetryAsync<unit>) =
     async {
         let consumerKey = ConfigurationManager.AppSettings.Item("TwitterConsumerKey")
         let consumerSecret = ConfigurationManager.AppSettings.Item("TwitterConsumerSecret")
@@ -96,7 +96,7 @@ let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsyn
                 let startTime = DateTime.UtcNow
                 try
                     processTweet log token queue
-                    return ExponentialBackoff.NoRetry
+                    return ExponentialBackoff.Success()
                 with
                 | :? System.Net.WebException as e ->
                     log Logging.Error (sprintf "Exception occurred in TwitterSource. Exception: %s" (e.ToString()))
@@ -105,10 +105,10 @@ let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsyn
                     let diff = curTime.Subtract(startTime)
                     match (int diff.TotalSeconds) with
                     | x when x <= (int retryConfig.MaxWaitTime) + 5000 -> return ExponentialBackoff.Retry
-                    | _ -> return ExponentialBackoff.NoRetry
+                    | _ -> return ExponentialBackoff.Success()
                 | :? System.Exception as e ->
                     log Logging.Error (sprintf "Exception occurred in TwitterSource. Exception: %s" (e.ToString()))
-                    return ExponentialBackoff.NoRetry
+                    return ExponentialBackoff.Success()
             }
 
         while true do

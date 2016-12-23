@@ -77,7 +77,7 @@ type private LogContext =
     {
         Storage : Storage.ITableStorage
         RecordQueue : ConcurrentQueue<LogRecord>
-        RetryAsync : ExponentialBackoff.RetryAsync
+        RetryAsync : ExponentialBackoff.RetryAsync<unit>
         RetryConfig : ExponentialBackoff.RetryConfig
         CancellationTokenSource : System.Threading.CancellationTokenSource
         mutable Disposed : bool
@@ -99,7 +99,7 @@ let private insert context entity =
         try
             let! result = context.Storage.InsertAsync(entity) |> Async.AwaitTask
             match result.HttpStatusCode with
-            | code when isSuccessCode code -> return ExponentialBackoff.NoRetry
+            | code when isSuccessCode code -> return ExponentialBackoff.Success()
             | _ -> return ExponentialBackoff.Retry
         with
         | Storage.InsertException(_) -> return ExponentialBackoff.Retry

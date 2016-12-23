@@ -2,11 +2,11 @@
 
 open Dropbox.Api
 open Dropbox.Api.Files
+open ExponentialBackoff
 open FavDrop.Domain
 open FSharp.Data
 open Microsoft.FSharp.Core.LanguagePrimitives
 open System.Collections.Concurrent
-open System.Configuration
 open System.IO
 open System.Text
 
@@ -32,7 +32,7 @@ type DropboxFile =
 
 let private saveFolderPath = ""
 
-let private createTweetFolderAsync (client : IDropboxFileClient) tweet =
+let internal createTweetFolderAsync (client : IDropboxFileClient) tweet =
     async {
         let tweetFolderPath = saveFolderPath + "/" + tweet.TweetId.ToString()
 
@@ -107,13 +107,13 @@ let private saveTweetInfoAsync (client : IDropboxFileClient) (makeTweetInfoFileP
         return! client.UploadAsync commitInfo memoryStream |> Async.Ignore
     }
 
-let private saveWithRetryAsync retryAsync log saveAsync =
+let private saveWithRetryAsync retryConfig log saveAsync =
     async {
-        do! retryAsync (fun () ->
+        do! retryAsync retryConfig (fun () ->
             async {
                 try
                     do! saveAsync()
-                    return ExponentialBackoff.NoRetry
+                    return ExponentialBackoff.Success ()
                 with
                 | :? ApiException<CreateFolderError> as e ->
                     log Logging.Error (e.ToString())
@@ -127,11 +127,11 @@ let private saveWithRetryAsync retryAsync log saveAsync =
             })
     }
 
-let private saveTweetInfoWithRetryAsync client retryAsync log tweetFolderPath tweetInfo =
-    saveWithRetryAsync retryAsync log (fun () -> saveTweetInfoAsync client tweetFolderPath tweetInfo)
+let private saveTweetInfoWithRetryAsync client retryConfig log tweetFolderPath tweetInfo =
+    saveWithRetryAsync retryConfig log (fun () -> saveTweetInfoAsync client tweetFolderPath tweetInfo)
 
-let private saveMediumWithRetryAsync client retryAsync log (makeMediaFilePath : string -> string) (uri : System.Uri) =
-    saveWithRetryAsync retryAsync log (fun () -> saveMediumAsync client makeMediaFilePath uri)
+let private saveMediumWithRetryAsync client retryConfig log (makeMediaFilePath : string -> string) (uri : System.Uri) =
+    saveWithRetryAsync retryConfig log (fun () -> saveMediumAsync client makeMediaFilePath uri)
 
 let private saveFavoritedTweetAsync saveTweetInfoAsync saveMediumAsync tweet =
     async {
@@ -144,7 +144,7 @@ let private saveFavoritedTweetAsync saveTweetInfoAsync saveMediumAsync tweet =
         |> ignore
     }
 
-let private storeTweet (client : IDropboxFileClient) (log : Logging.Log) (retryAsync : (unit -> Async<ExponentialBackoff.RetryActionResult>) -> Async<unit>) (queue : ConcurrentQueue<FavoritedTweet>) =
+let private storeTweet (client : IDropboxFileClient) (log : Logging.Log) retryConfig (queue : ConcurrentQueue<FavoritedTweet>) =
     async {
         try
             let (isSucceeded, tweet) = queue.TryDequeue()
@@ -152,8 +152,8 @@ let private storeTweet (client : IDropboxFileClient) (log : Logging.Log) (retryA
                 log Logging.Information (sprintf "got favorited tweet: %d" tweet.TweetId)
 
                 let! tweetFolderPath = createTweetFolderAsync client tweet
-                let saveTweetInfoAsync = saveTweetInfoWithRetryAsync client retryAsync log (fun () -> makeTweetInfoFilePath tweetFolderPath)
-                let saveMediumAsync = saveMediumWithRetryAsync client retryAsync log (makeMediaFilePath tweetFolderPath)
+                let saveTweetInfoAsync = saveTweetInfoWithRetryAsync client retryConfig log (fun () -> makeTweetInfoFilePath tweetFolderPath)
+                let saveMediumAsync = saveMediumWithRetryAsync client retryConfig log (makeMediaFilePath tweetFolderPath)
 
                 do! saveFavoritedTweetAsync saveTweetInfoAsync saveMediumAsync tweet
             else
@@ -163,12 +163,12 @@ let private storeTweet (client : IDropboxFileClient) (log : Logging.Log) (retryA
             log Logging.Error (e.ToString())
     }
 
-let run (log : Logging.Log) (client : IDropboxFileClient) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsync : ExponentialBackoff.RetryAsync) =
+let run (log : Logging.Log) (client : IDropboxFileClient) (queue : ConcurrentQueue<FavoritedTweet>) retryConfig =
     async {
         let retryConfig =
             { ExponentialBackoff.WaitTime = Int32WithMeasure(1000)
               ExponentialBackoff.MaxWaitTime = Int32WithMeasure(15 * 60 * 1000) }
         
         while true do
-            do! storeTweet client log (retryAsync retryConfig) queue
+            do! storeTweet client log retryConfig queue
     }
