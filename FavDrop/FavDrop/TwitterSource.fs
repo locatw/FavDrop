@@ -66,15 +66,17 @@ let private queueTweet (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTwe
     queue.Enqueue(favoritedTweet)
     log Logging.Information (sprintf "tweet queued : %d" favoritedTweet.TweetId)
 
-let private processTweet (log : Logging.Log) (token : CoreTweet.Tokens) (queue : ConcurrentQueue<FavoritedTweet>) =
-    token.Streaming.User()
-    |> Seq.filter(fun msg -> msg :? Streaming.EventMessage)
-    |> Seq.map(fun msg -> msg :?> Streaming.EventMessage)
-    |> Seq.filter(fun msg -> msg.Event = Streaming.EventCode.Favorite)
-    |> Seq.map(fun msg -> msg.TargetStatus)
-    |> Seq.filter withMedia
-    |> Seq.map convertTweet
-    |> Seq.iter (queueTweet log queue)
+let private processTweet (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (message : Streaming.StreamingMessage) =
+    match message with
+    | :? Streaming.EventMessage as msg when msg.Event = Streaming.EventCode.Favorite && withMedia msg.TargetStatus ->
+        queueTweet log queue (convertTweet msg.TargetStatus)
+    | :? Streaming.DisconnectMessage
+    | :? Streaming.WarningMessage
+    | :? Streaming.LimitMessage
+    | :? Streaming.RawJsonMessage ->
+        log Logging.Warning (sprintf "Error message received from twitter: %s" (message.ToString()))
+    | _ ->
+        ()
 
 let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsync : ExponentialBackoff.RetryAsync<unit>) =
     async {
@@ -95,17 +97,25 @@ let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsyn
             async {
                 let startTime = DateTime.UtcNow
                 try
-                    processTweet log token queue
+                    token.Streaming.User()
+                    |> Seq.iter (processTweet log queue)
+
                     return ExponentialBackoff.Success()
                 with
-                | :? System.Net.WebException as e ->
-                    log Logging.Error (sprintf "Exception occurred in TwitterSource. Exception: %s" (e.ToString()))
-
+                | :? TwitterException as e ->
                     let curTime = DateTime.UtcNow
                     let diff = curTime.Subtract(startTime)
                     match (int diff.TotalSeconds) with
-                    | x when x <= (int retryConfig.MaxWaitTime) + 5000 -> return ExponentialBackoff.Retry
-                    | _ -> return ExponentialBackoff.Success()
+                    | x when x <= (int retryConfig.MaxWaitTime) + 5000 ->
+                        log Logging.Error (sprintf "TwitterException occurred in TwitterSource. Exception: %s" (e.ToString()))
+                        return ExponentialBackoff.Retry
+                    | _ ->
+                        let messageBuilder = new System.Text.StringBuilder()
+                        messageBuilder.Append("TwitterException occurred in TwitterSource.") |> ignore
+                        messageBuilder.Append(" This is the first error after normal process started and may be disconnected from twitter.") |> ignore
+                        messageBuilder.AppendFormat(" Exception: %s", e.ToString()) |> ignore
+                        log Logging.Error (messageBuilder.ToString())
+                        return ExponentialBackoff.Success()
                 | :? System.Exception as e ->
                     log Logging.Error (sprintf "Exception occurred in TwitterSource. Exception: %s" (e.ToString()))
                     return ExponentialBackoff.Success()
