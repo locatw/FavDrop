@@ -11,7 +11,7 @@ let main _ =
     let storageConnectionString =
         ConfigurationManager.AppSettings.Item("StorageConnectionString")
     let queue = new ConcurrentQueue<FavoritedTweet>()
-    let storage = new Storage.TableStorage(storageConnectionString, "FavDropAppLogDebug")
+    let storage = new Storage.TableStorage(storageConnectionString, "FavDropAppLog")
     let retryConfig =
         { ExponentialBackoff.WaitTime = Int32WithMeasure(1000)
           ExponentialBackoff.MaxWaitTime = Int32WithMeasure(15 * 60 * 1000) }
