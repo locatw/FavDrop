@@ -78,7 +78,7 @@ let private processTweet (log : Logging.Log) (queue : ConcurrentQueue<FavoritedT
     | _ ->
         ()
 
-let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsync : ExponentialBackoff.RetryAsync<unit>) =
+let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryConfig : ExponentialBackoff.RetryConfig) =
     async {
         let consumerKey = ConfigurationManager.AppSettings.Item("TwitterConsumerKey")
         let consumerSecret = ConfigurationManager.AppSettings.Item("TwitterConsumerSecret")
@@ -88,10 +88,6 @@ let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsyn
         let token = Tokens.Create(consumerKey, consumerSecret, accessToken, accessTokenSecret)
 
         log Logging.Information "TwitterSource initialized"
-
-        let retryConfig =
-            { ExponentialBackoff.WaitTime = Int32WithMeasure(1000)
-              ExponentialBackoff.MaxWaitTime = Int32WithMeasure(15 * 60 * 1000) }
 
         let f () =
             async {
@@ -123,6 +119,6 @@ let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryAsyn
 
         while true do
             log Logging.Debug "one process start"
-            do! (retryAsync retryConfig) f
+            do! ExponentialBackoff.retryAsync retryConfig f
             log Logging.Debug "one process end"
     }
