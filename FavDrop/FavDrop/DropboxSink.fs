@@ -77,7 +77,7 @@ let private makeTweetInfo tweet =
                 tweet.FavoritedAt.ToString(),
                 tweet.Text,
                 media)
-    TweetInfoFile(json.JsonValue.ToString())
+    TweetInfoFile(json.ToJson())
 
 let private makeDropboxFiles tweet =
     (makeTweetInfo tweet) :: (makeMediaFiles tweet)
