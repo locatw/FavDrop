@@ -20,7 +20,10 @@ type DropboxFileClient(client : DropboxClient) =
 
     interface IDropboxFileClient with
         member __.CreateFolderAsync (path : string) =
-            files.CreateFolderAsync(path) |> Async.AwaitTask
+            async {
+                let! result = files.CreateFolderV2Async(path) |> Async.AwaitTask
+                return result.Metadata
+            }
 
         member __.UploadAsync (commitInfo : CommitInfo) (body : Stream) =
             files.UploadAsync(commitInfo, body) |> Async.AwaitTask

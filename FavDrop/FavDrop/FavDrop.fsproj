@@ -78,8 +78,7 @@
       <Private>True</Private>
     </Reference>
     <Reference Include="Dropbox.Api">
-      <HintPath>..\packages\Dropbox.Api.3.6.0\lib\net45\Dropbox.Api.dll</HintPath>
-      <Private>True</Private>
+      <HintPath>..\packages\Dropbox.Api.4.9.0\lib\net45\Dropbox.Api.dll</HintPath>
     </Reference>
     <Reference Include="FSharp.Control.AsyncSeq">
       <HintPath>..\packages\FSharp.Control.AsyncSeq.1.13\lib\net40\FSharp.Control.AsyncSeq.dll</HintPath>
