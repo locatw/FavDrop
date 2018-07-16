@@ -4,10 +4,10 @@ open Dropbox.Api
 open Dropbox.Api.Files
 open ExponentialBackoff
 open FavDrop.Domain
-open FSharp.Data
 open Microsoft.FSharp.Core.LanguagePrimitives
 open System.Collections.Concurrent
 open System.IO
+open System.Net
 open System.Text
 
 type IDropboxFileClient =
@@ -102,15 +102,32 @@ let internal createTweetFolderWithRetryAsync (client : IDropboxFileClient) log r
             })
     }
 
-let private downloadMediaAsync log retryConfig url =
+let private downloadMediaAsync log retryConfig (url : string) =
+    let readResponseBodyAsync (response : WebResponse) =
+        let rec readAsync (buffer : byte array) (inputStream : Stream) (outputStream : Stream) =
+            async {
+                let! readCount = inputStream.ReadAsync(buffer, 0, Array.length buffer) |> Async.AwaitTask
+                if 0 < readCount then
+                    outputStream.Write(buffer, 0, readCount)
+                    return! readAsync buffer inputStream outputStream
+            }
+
+        async {
+            use bodyStream = response.GetResponseStream()
+            // Twitter cannot upload large size media, so output size is lesser than maximum value of int.
+            use outStream = new MemoryStream(int response.ContentLength)
+            let buffer = Array.init (16 * 1024) (fun _ -> 0uy)
+            do! readAsync buffer bodyStream outStream
+            return outStream.ToArray()
+        }
+
     async {
         return! retryAsync retryConfig (fun () ->
             async {
                 try
-                    let! response = Http.AsyncRequest(url)
-                    let data = match response.Body with
-                               | Binary x -> x
-                               | _ -> raise (new System.Exception("response body must be binary"))
+                    let request = WebRequest.CreateHttp(url)
+                    use! response = request.GetResponseAsync() |> Async.AwaitTask
+                    let! data = readResponseBodyAsync response
                     return Success data
                 with
                 | :? RateLimitException as e ->
