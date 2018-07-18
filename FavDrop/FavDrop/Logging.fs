@@ -1,6 +1,5 @@
 ﻿module FavDrop.Logging
 
-open FSharp.Control
 open Microsoft.WindowsAzure.Storage
 open Microsoft.WindowsAzure.Storage.Table
 open System
