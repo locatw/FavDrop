@@ -2,9 +2,6 @@
 
 open CoreTweet
 open FavDrop.Domain
-open FSharpx
-open FSharpx.Option
-open Microsoft.FSharp.Core.LanguagePrimitives
 open System
 open System.Collections.Concurrent
 open System.Configuration
@@ -51,14 +48,10 @@ let private convertTweet (tweet : Status) =
 
 let private withMedia (tweet : Status) =
     let isMediaInEntities (entities : CoreTweet.Entities) =
-        let media =
-            maybe {
-                let! entities = entities |> FSharpOption.ToFSharpOption
-                return! entities.Media |> FSharpOption.ToFSharpOption
-            }
-        match media with
-        | Some x -> 0 < x.Length
-        | None -> false
+        match entities.Media with
+        | [||] -> false
+        | null -> false
+        | _ -> true
     [tweet.Entities; tweet.ExtendedEntities]
     |> List.forall isMediaInEntities
 
