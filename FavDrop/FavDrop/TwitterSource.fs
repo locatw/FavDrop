@@ -2,9 +2,9 @@
 
 open CoreTweet
 open FavDrop.Domain
+open Microsoft.Extensions.Configuration
 open System
 open System.Collections.Concurrent
-open System.Configuration
 
 let private convertPhotoMedium (media : CoreTweet.MediaEntity) =
     { PhotoMedium.Url = media.MediaUrlHttps }
@@ -71,12 +71,12 @@ let private processTweet (log : Logging.Log) (queue : ConcurrentQueue<FavoritedT
     | _ ->
         ()
 
-let run (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryConfig : ExponentialBackoff.RetryConfig) =
+let run (config : IConfigurationRoot) (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryConfig : ExponentialBackoff.RetryConfig) =
     async {
-        let consumerKey = ConfigurationManager.AppSettings.Item("TwitterConsumerKey")
-        let consumerSecret = ConfigurationManager.AppSettings.Item("TwitterConsumerSecret")
-        let accessToken = ConfigurationManager.AppSettings.Item("TwitterAccessToken")
-        let accessTokenSecret = ConfigurationManager.AppSettings.Item("TwitterAccessSecret")
+        let consumerKey = config.Item("TwitterConsumerKey")
+        let consumerSecret = config.Item("TwitterConsumerSecret")
+        let accessToken = config.Item("TwitterAccessToken")
+        let accessTokenSecret = config.Item("TwitterAccessSecret")
 
         let token = Tokens.Create(consumerKey, consumerSecret, accessToken, accessTokenSecret)
 

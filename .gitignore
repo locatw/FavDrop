@@ -250,7 +250,7 @@ paket-files/
 # JetBrains Rider
 .idea/
 *.sln.iml
-/FavDrop/FavDrop/App.secret.config
+/FavDrop/FavDrop/App.secret.json
 /FavDrop/.paket/paket.exe
 /FavDrop/pack
 /FavDrop/*.zip
