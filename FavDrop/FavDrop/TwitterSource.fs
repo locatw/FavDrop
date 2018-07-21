@@ -5,6 +5,7 @@ open FavDrop.Domain
 open Microsoft.Extensions.Configuration
 open System
 open System.Collections.Concurrent
+open System.Threading
 
 let private convertPhotoMedium (media : CoreTweet.MediaEntity) =
     { PhotoMedium.Url = media.MediaUrlHttps }
@@ -71,6 +72,14 @@ let private processTweet (log : Logging.Log) (queue : ConcurrentQueue<FavoritedT
     | _ ->
         ()
 
+let private createTweetObserver next completed error =
+    {
+        new IObserver<Streaming.StreamingMessage> with
+            member __.OnCompleted () = completed ()
+            member __.OnError(e : Exception) = error e
+            member __.OnNext(message : Streaming.StreamingMessage) = next message
+    }
+
 let run (config : IConfigurationRoot) (log : Logging.Log) (queue : ConcurrentQueue<FavoritedTweet>) (retryConfig : ExponentialBackoff.RetryConfig) =
     async {
         let consumerKey = config.Item("TwitterConsumerKey")
@@ -85,29 +94,42 @@ let run (config : IConfigurationRoot) (log : Logging.Log) (queue : ConcurrentQue
         let f () =
             async {
                 let startTime = DateTime.UtcNow
-                try
-                    token.Streaming.User()
-                    |> Seq.iter (processTweet log queue)
+                use waitEvent = new ManualResetEvent(false)
+                let mutable result = ExponentialBackoff.Success()
 
-                    return ExponentialBackoff.Success()
-                with
-                | :? TwitterException as e ->
-                    let curTime = DateTime.UtcNow
-                    let diff = curTime.Subtract(startTime)
-                    match (int diff.TotalSeconds) with
-                    | x when x <= (int retryConfig.MaxWaitTime) + 5000 ->
-                        log Logging.Error (sprintf "TwitterException occurred in TwitterSource. Exception: %s" (e.ToString()))
-                        return ExponentialBackoff.Retry
-                    | _ ->
-                        let messageBuilder = new System.Text.StringBuilder()
-                        messageBuilder.Append("TwitterException occurred in TwitterSource.") |> ignore
-                        messageBuilder.Append(" This is the first error after normal process started and may be disconnected from twitter.") |> ignore
-                        messageBuilder.AppendFormat(" Exception: %s", e.ToString()) |> ignore
-                        log Logging.Error (messageBuilder.ToString())
-                        return ExponentialBackoff.Success()
-                | :? System.Exception as e ->
-                    log Logging.Error (sprintf "Exception occurred in TwitterSource. Exception: %s" (e.ToString()))
-                    return ExponentialBackoff.Success()
+                let next = processTweet log queue
+                let completed () =
+                    result <- ExponentialBackoff.Success()
+                    if waitEvent.Set() then
+                        ()
+                    else
+                        raise (ApplicationException("Cannot set state of the event to signaled."))
+                let error (e : Exception) =
+                    match e with
+                    | :? TwitterException as e ->
+                        let curTime = DateTime.UtcNow
+                        let diff = curTime.Subtract(startTime)
+                        match (int diff.TotalSeconds) with
+                        | x when x <= (int retryConfig.MaxWaitTime) + 5000 ->
+                            log Logging.Error (sprintf "TwitterException occurred in TwitterSource. Exception: %s" (e.ToString()))
+                            result <- ExponentialBackoff.Retry
+                        | _ ->
+                            let messageBuilder = new System.Text.StringBuilder()
+                            messageBuilder.Append("TwitterException occurred in TwitterSource.") |> ignore
+                            messageBuilder.Append(" This is the first error after normal process started and may be disconnected from twitter.") |> ignore
+                            messageBuilder.AppendFormat(" Exception: %s", e.ToString()) |> ignore
+                            log Logging.Error (messageBuilder.ToString())
+                            result <- ExponentialBackoff.Success()
+                    | :? Exception as e ->
+                        log Logging.Error (sprintf "Exception occurred in TwitterSource. Exception: %s" (e.ToString()))
+                        result <- ExponentialBackoff.Success()
+                    waitEvent.Set() |> ignore
+                let observer = createTweetObserver next completed error
+
+                use _ = token.Streaming.UserAsObservable().Subscribe(observer)
+
+                waitEvent.WaitOne(Timeout.Infinite) |> ignore
+                return result
             }
 
         while true do

@@ -16,7 +16,7 @@ type TableStorage (connectionString : string, tableName : string) =
         account.CreateCloudTableClient()
     let table = client.GetTableReference(tableName)
     do
-        table.CreateIfNotExists() |> ignore
+        table.CreateIfNotExistsAsync() |> Async.AwaitTask |> ignore
 
     member this.InsertAsync(record : ITableEntity) =
         (this :> ITableStorage).InsertAsync record
