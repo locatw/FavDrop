@@ -5,10 +5,12 @@ VisualStudioVersion = 15.0.27428.2015
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "FavDrop", "FavDrop\FavDrop.fsproj", "{EC2692E5-B554-4DCA-9FAC-E49246DE24B5}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "FavDropTest", "FavDropTest\FavDropTest.fsproj", "{73881A17-9E12-41CD-8008-DAF06AD23587}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "FavDropTest", "FavDropTest\FavDropTest.fsproj", "{73881A17-9E12-41CD-8008-DAF06AD23587}"
 	ProjectSection(ProjectDependencies) = postProject
 		{EC2692E5-B554-4DCA-9FAC-E49246DE24B5} = {EC2692E5-B554-4DCA-9FAC-E49246DE24B5}
 	EndProjectSection
+EndProject
+Project("{E53339B2-1760-4266-BCC7-CA923CBCF16C}") = "docker-compose", "docker-compose.dcproj", "{7A2AF2B2-746E-44ED-8F03-3D3C52FCA2C9}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -24,6 +26,10 @@ Global
 		{73881A17-9E12-41CD-8008-DAF06AD23587}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{73881A17-9E12-41CD-8008-DAF06AD23587}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{73881A17-9E12-41CD-8008-DAF06AD23587}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7A2AF2B2-746E-44ED-8F03-3D3C52FCA2C9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7A2AF2B2-746E-44ED-8F03-3D3C52FCA2C9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7A2AF2B2-746E-44ED-8F03-3D3C52FCA2C9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7A2AF2B2-746E-44ED-8F03-3D3C52FCA2C9}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

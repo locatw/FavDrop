@@ -1,0 +1,4 @@
+version: '3'
+services:
+  favdrop:
+    image: loca/fav-drop

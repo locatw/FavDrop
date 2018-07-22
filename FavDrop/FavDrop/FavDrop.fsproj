@@ -29,6 +29,7 @@
     <Content Include="App.secret.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <None Include="Dockerfile" />
   </ItemGroup>
 
   <ItemGroup>

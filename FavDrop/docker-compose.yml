@@ -1,0 +1,8 @@
+version: '3'
+
+services:
+  favdrop:
+    image: favdrop
+    build:
+      context: .
+      dockerfile: FavDrop/Dockerfile
